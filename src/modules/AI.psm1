@@ -125,6 +125,7 @@ function Set-DzAiBusy {
         if ($global:btnDzAiExplainQuery) { $global:btnDzAiExplainQuery.IsEnabled = -not $IsBusy }
         if ($global:btnDzAiExplainMessages) { $global:btnDzAiExplainMessages.IsEnabled = -not $IsBusy }
         if ($global:btnDzAiUseApiKey) { $global:btnDzAiUseApiKey.IsEnabled = -not $IsBusy }
+        if ($global:btnDzAiLogout) { $global:btnDzAiLogout.IsEnabled = -not $IsBusy }
     } catch {}
 }
 
@@ -142,6 +143,24 @@ function Show-DzAiKeyPrompt {
     } catch {}
     if (-not [string]::IsNullOrWhiteSpace($Message)) { Set-DzAiOutput $Message }
     Set-DzAiStatus "API key requerida"
+}
+
+function Open-DzAiApiKeyUrl {
+    $url = "https://aistudio.google.com/app/apikey"
+    Write-DzAiDebug "Abriendo URL para crear API key: $url" ([System.ConsoleColor]::Cyan)
+    try {
+        Start-Process $url
+    } catch {
+        Write-DzAiDebug ("No se pudo abrir URL API key: {0}" -f $_.Exception.Message) ([System.ConsoleColor]::Red)
+        Set-DzAiOutput "No se pudo abrir el navegador. Copia esta URL:`n$url"
+    }
+}
+
+function Disconnect-DzAiSession {
+    Write-DzAiDebug "Cerrando sesion IA y limpiando API key en memoria." ([System.ConsoleColor]::Yellow)
+    Clear-DzAiRequestState
+    Set-DzAiBusy $false
+    Show-DzAiKeyPrompt -Message "Sesion IA cerrada. Escribe una API key para volver a usar Gemini."
 }
 
 function Confirm-DzAiApiKey {
@@ -570,8 +589,10 @@ function Initialize-DzAiTab {
         $global:pnlDzAiActions = $Window.FindName("pnlDzAiActions")
         $global:pwdDzAiApiKey = $Window.FindName("pwdDzAiApiKey")
         $global:btnDzAiUseApiKey = $Window.FindName("btnDzAiUseApiKey")
+        $global:btnDzAiOpenApiKeyUrl = $Window.FindName("btnDzAiOpenApiKeyUrl")
         $global:btnDzAiExplainQuery = $Window.FindName("btnDzAiExplainQuery")
         $global:btnDzAiExplainMessages = $Window.FindName("btnDzAiExplainMessages")
+        $global:btnDzAiLogout = $Window.FindName("btnDzAiLogout")
         $global:txtDzAiOutput = $Window.FindName("txtDzAiOutput")
         $global:lblDzAiStatus = $Window.FindName("lblDzAiStatus")
 
@@ -580,6 +601,9 @@ function Initialize-DzAiTab {
 
         if ($global:btnDzAiUseApiKey) {
             $global:btnDzAiUseApiKey.Add_Click({ Confirm-DzAiApiKey }.GetNewClosure())
+        }
+        if ($global:btnDzAiOpenApiKeyUrl) {
+            $global:btnDzAiOpenApiKeyUrl.Add_Click({ Open-DzAiApiKeyUrl }.GetNewClosure())
         }
         if ($global:pwdDzAiApiKey) {
             $global:pwdDzAiApiKey.Add_KeyDown({
@@ -595,6 +619,9 @@ function Initialize-DzAiTab {
         }
         if ($global:btnDzAiExplainMessages) {
             $global:btnDzAiExplainMessages.Add_Click({ Invoke-DzAiExplainMessages }.GetNewClosure())
+        }
+        if ($global:btnDzAiLogout) {
+            $global:btnDzAiLogout.Add_Click({ Disconnect-DzAiSession }.GetNewClosure())
         }
 
         Show-DzAiKeyPrompt -Message "Escribe la API key de Gemini. No se guardara en archivos ni configuraciones; solo vivira hasta cerrar la aplicacion."
@@ -613,6 +640,8 @@ Export-ModuleMember -Function @(
     'Invoke-DzAiExplainMessages',
     'Confirm-DzAiApiKey',
     'Show-DzAiKeyPrompt',
+    'Open-DzAiApiKeyUrl',
+    'Disconnect-DzAiSession',
     'Clear-DzAiRequestState',
     'Set-DzAiStatus',
     'Set-DzAiOutput',

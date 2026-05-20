@@ -1523,7 +1523,7 @@ function Get-MainWindowXaml {
                                             BorderThickness="0"/>
                                 </TabItem>
 
-                                <TabItem Header="IA" Name="tabDzAi">
+                                <TabItem Header="🤖 IA" Name="tabDzAi">
                                     <Grid Margin="10">
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto"/>
@@ -1541,6 +1541,20 @@ function Get-MainWindowXaml {
                                                     Foreground="{DynamicResource AccentMuted}"
                                                     FontSize="10"
                                                     Margin="0,0,0,8"/>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                                <TextBlock Text="Puedes crear tu API key en "
+                                                        Foreground="{DynamicResource AccentMuted}"
+                                                        FontSize="10"/>
+                                                <Button Name="btnDzAiOpenApiKeyUrl"
+                                                        Content="Google AI Studio"
+                                                        Padding="0"
+                                                        BorderThickness="0"
+                                                        Background="Transparent"
+                                                        Foreground="{DynamicResource AccentPrimary}"
+                                                        Cursor="Hand"
+                                                        FontSize="10"
+                                                        ToolTip="Abrir https://aistudio.google.com/app/apikey"/>
+                                            </StackPanel>
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*"/>
@@ -1576,6 +1590,12 @@ function Get-MainWindowXaml {
                                                     Style="{StaticResource DatabaseButtonStyle}"/>
                                             <Button Name="btnDzAiExplainMessages"
                                                     Content="Explica los mensajes"
+                                                    Height="28"
+                                                    Padding="10,2"
+                                                    Margin="0,0,6,0"
+                                                    Style="{StaticResource DatabaseButtonStyle}"/>
+                                            <Button Name="btnDzAiLogout"
+                                                    Content="Cerrar sesión"
                                                     Height="28"
                                                     Padding="10,2"
                                                     Style="{StaticResource DatabaseButtonStyle}"/>
