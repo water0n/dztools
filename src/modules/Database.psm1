@@ -1,7 +1,6 @@
 ﻿if ($PSVersionTable.PSVersion.Major -lt 5) { throw "Se requiere PowerShell 5.0 o superior." }
 $script:queryTabCounter = 1
-if ([string]::IsNullOrWhiteSpace($global:DzSqlKeywords)) { $global:DzSqlKeywords = 'ADD|ALL|ALTER|AND|ANY|AS|ASC|AUTHORIZATION|BACKUP|BETWEEN|BIGINT|BINARY|BIT|BY|CASE|CHECK|COLUMN|CONSTRAINT|CREATE|CROSS|CURRENT_DATE|CURRENT_TIME|CURRENT_TIMESTAMP|DATABASE|DEFAULT|DELETE|DESC|DISTINCT|DROP|EXEC|EXECUTE|EXISTS|FOREIGN|FROM|FULL|FUNCTION|GROUP|HAVING|IN|INDEX|INNER|INSERT|INT|INTO|IS|JOIN|KEY|LEFT|LIKE|LIMIT|NOT|NULL|ON|OR|ORDER|OUTER|PRIMARY|PROCEDURE|REFERENCES|RETURN|RIGHT|ROWNUM|SELECT|SET|SMALLINT|TABLE|TOP|TRUNCATE|UNION|UNIQUE|UPDATE|VALUES|VIEW|WHERE|WITH|RESTORE' }
-function Process-SqlProgressMessage { param([string]$Message) if ($Message -match '(?i)(\d{1,3})\s*percent') { $percent = [int]$Matches[1]; Write-Output "Progreso: $percent%" } elseif ($Message -match 'BACKUP DATABASE successfully processed') { Write-Output "Backup completado exitosamente" } }
+#Database.psm1 - Módulo de funciones de acceso a bases de datos SQL Server
 function New-DzSqlConnectionFromCredential {
     [CmdletBinding()]
     param(
@@ -415,44 +414,11 @@ ORDER BY
     Write-DzDebug "`t[DEBUG][Get-SqlDatabasesInfo] Retornando $($databases.Count) bases de datos"
     return $databases
 }
-function Backup-Database {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)][string]$Server,
-        [Parameter(Mandatory = $true)][string]$Database,
-        [Parameter(Mandatory = $true)][System.Management.Automation.PSCredential]$Credential,
-        [Parameter(Mandatory = $true)][string]$BackupPath,
-        [Parameter(Mandatory = $false)][scriptblock]$ProgressCallback
-    )
-    try {
-        Write-DzDebug "`t[DEBUG][Backup-Database] Iniciando backup de '$Database' a '$BackupPath'"
-        $backupQuery = @"
-BACKUP DATABASE [$Database]
-TO DISK='$BackupPath'
-WITH CHECKSUM, STATS = 1, FORMAT, INIT
-"@
-        $infoCallback = { param($message) if ($ProgressCallback) { & $ProgressCallback $message } }
-        $result = Invoke-SqlQuery -Server $Server -Database "master" -Query $backupQuery -Credential $Credential -InfoMessageCallback $infoCallback
-        if ($result.Success) { Write-DzDebug "`t[DEBUG][Backup-Database] Backup completado exitosamente"; return @{ Success = $true; BackupPath = $BackupPath } }
-        Write-DzDebug "`t[DEBUG][Backup-Database] Error en backup: $($result.ErrorMessage)"
-        @{ Success = $false; ErrorMessage = $result.ErrorMessage }
-    } catch {
-        Write-DzDebug "`t[DEBUG][Backup-Database] Excepción: $($_.Exception.Message)"
-        @{ Success = $false; ErrorMessage = $_.Exception.Message }
-    }
-}
 function Execute-SqlQuery {
     param([string]$server, [string]$database, [string]$query)
     $result = Invoke-DzSqlCommandInternal -Server $server -Database $database -Query $query -User $global:user -Password $global:password -CollectMessages
     if (-not $result.Success) { throw $result.ErrorMessage }
     return $result
-}
-function Show-ResultsConsole {
-    param([string]$query)
-    try {
-        $results = Execute-SqlQuery -server $global:server -database $global:database -query $query
-        Write-DzSqlResultSummary -Result $results -Context "Consulta"
-    } catch { Write-Host "`nError al ejecutar la consulta: $_" -ForegroundColor Red }
 }
 function Get-IniConnections {
     $connections = @()
@@ -518,237 +484,6 @@ function Load-IniConnectionsToComboBox {
         $Combo.Text = ".\NationalSoft"
     }
 }
-function ConvertTo-DataTable {
-    param($InputObject)
-    $dt = New-Object System.Data.DataTable
-    if (-not $InputObject) { return $dt }
-    $cols = $InputObject[0].Keys
-    foreach ($c in $cols) { [void]$dt.Columns.Add($c) }
-    foreach ($row in $InputObject) { $dr = $dt.NewRow(); foreach ($c in $cols) { $dr[$c] = $row[$c] }; [void]$dt.Rows.Add($dr) }
-    $dt
-}
-function bdd_RenameFromTree {
-    param(
-        [Parameter(Mandatory = $true)][string]$Title,
-        [Parameter(Mandatory = $true)][string]$Prompt,
-        [Parameter(Mandatory = $false)][string]$DefaultValue = ""
-    )
-    $safeTitle = [Security.SecurityElement]::Escape($Title)
-    $safePrompt = [Security.SecurityElement]::Escape($Prompt)
-    $safeDefault = [Security.SecurityElement]::Escape($DefaultValue)
-    $xaml = @"
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="$safeTitle"
-        Height="260"
-        Width="520"
-        WindowStartupLocation="CenterOwner"
-        ResizeMode="NoResize"
-        WindowStyle="None"
-        Background="Transparent"
-        AllowsTransparency="True"
-        ShowInTaskbar="False"
-        Topmost="True">
-    <Window.Resources>
-        <Style TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{DynamicResource PanelFg}"/>
-        </Style>
-        <Style TargetType="TextBox">
-            <Setter Property="Background" Value="{DynamicResource ControlBg}"/>
-            <Setter Property="Foreground" Value="{DynamicResource ControlFg}"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrushColor}"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Padding" Value="10,6"/>
-        </Style>
-        <Style x:Key="BaseButtonStyle" TargetType="Button">
-            <Setter Property="OverridesDefaultStyle" Value="True"/>
-            <Setter Property="SnapsToDevicePixels" Value="True"/>
-            <Setter Property="Background" Value="{DynamicResource ControlBg}"/>
-            <Setter Property="Foreground" Value="{DynamicResource ControlFg}"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrushColor}"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Padding" Value="12,6"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="8"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center"/>
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            <Style.Triggers>
-                <Trigger Property="IsEnabled" Value="False">
-                    <Setter Property="Opacity" Value="1"/>
-                    <Setter Property="Cursor" Value="Arrow"/>
-                    <Setter Property="Background" Value="{DynamicResource ControlBg}"/>
-                    <Setter Property="Foreground" Value="{DynamicResource AccentMuted}"/>
-                    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrushColor}"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-        <Style x:Key="ActionButtonStyle" TargetType="Button" BasedOn="{StaticResource BaseButtonStyle}">
-            <Setter Property="Background" Value="{DynamicResource AccentMagenta}"/>
-            <Setter Property="Foreground" Value="{DynamicResource FormFg}"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource AccentMagentaHover}"/>
-                </Trigger>
-                <Trigger Property="IsEnabled" Value="False">
-                    <Setter Property="Background" Value="{DynamicResource ControlBg}"/>
-                    <Setter Property="Foreground" Value="{DynamicResource AccentMuted}"/>
-                    <Setter Property="BorderThickness" Value="1"/>
-                    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrushColor}"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-        <Style x:Key="OutlineButtonStyle" TargetType="Button" BasedOn="{StaticResource BaseButtonStyle}">
-            <Setter Property="Background" Value="{DynamicResource ControlBg}"/>
-            <Setter Property="Foreground" Value="{DynamicResource ControlFg}"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrushColor}"/>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource AccentSecondary}"/>
-                    <Setter Property="Foreground" Value="{DynamicResource FormFg}"/>
-                    <Setter Property="BorderThickness" Value="0"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-        <Style x:Key="CloseButtonStyle" TargetType="Button" BasedOn="{StaticResource BaseButtonStyle}">
-            <Setter Property="Width" Value="34"/>
-            <Setter Property="Height" Value="34"/>
-            <Setter Property="Padding" Value="0"/>
-            <Setter Property="FontSize" Value="16"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Content" Value="×"/>
-        </Style>
-    </Window.Resources>
-    <Grid Background="{DynamicResource FormBg}" Margin="12">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
-        <Border Grid.Row="0"
-                Name="brdTitleBar"
-                Background="{DynamicResource PanelBg}"
-                BorderBrush="{DynamicResource BorderBrushColor}"
-                BorderThickness="1"
-                CornerRadius="10"
-                Padding="12"
-                Margin="0,0,0,10">
-            <DockPanel LastChildFill="True">
-                <TextBlock DockPanel.Dock="Left"
-                           Text="$safeTitle"
-                           Foreground="{DynamicResource FormFg}"
-                           FontSize="16"
-                           FontWeight="SemiBold"
-                           VerticalAlignment="Center"/>
-                <Button DockPanel.Dock="Right"
-                        Name="btnClose"
-                        Style="{StaticResource CloseButtonStyle}"/>
-            </DockPanel>
-        </Border>
-        <Border Grid.Row="1"
-                Background="{DynamicResource PanelBg}"
-                BorderBrush="{DynamicResource BorderBrushColor}"
-                BorderThickness="1"
-                CornerRadius="10"
-                Padding="12">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
-                <TextBlock Grid.Row="0"
-                           Text="$safePrompt"
-                           Margin="0,0,0,10"
-                           FontWeight="SemiBold"/>
-                <TextBox Grid.Row="1"
-                         Name="txtInput"
-                         Height="34"
-                         Text="$safeDefault"
-                         VerticalContentAlignment="Center"/>
-            </Grid>
-        </Border>
-        <Border Grid.Row="2"
-                Background="{DynamicResource PanelBg}"
-                BorderBrush="{DynamicResource BorderBrushColor}"
-                BorderThickness="1"
-                CornerRadius="10"
-                Padding="10"
-                Margin="0,10,0,0">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0"
-                           Text="Enter: Aceptar   |   Esc: Cerrar"
-                           VerticalAlignment="Center"/>
-                <StackPanel Grid.Column="1"
-                            Orientation="Horizontal">
-                    <Button Name="btnCancel"
-                            Content="Cancelar"
-                            Width="120"
-                            Height="34"
-                            Margin="0,0,10,0"
-                            Style="{StaticResource OutlineButtonStyle}"/>
-                    <Button Name="btnOk"
-                            Content="Aceptar"
-                            Width="140"
-                            Height="34"
-                            IsDefault="True"
-                            Style="{StaticResource ActionButtonStyle}"/>
-                </StackPanel>
-            </Grid>
-        </Border>
-    </Grid>
-</Window>
-"@
-    try {
-        $ui = New-WpfWindow -Xaml $xaml -PassThru
-        $w = $ui.Window
-        $c = $ui.Controls
-        $theme = Get-DzUiTheme
-        Set-DzWpfThemeResources -Window $w -Theme $theme
-        try { Set-WpfDialogOwner -Dialog $w } catch {}
-        $txtInput = $c['txtInput']
-        $btnOk = $c['btnOk']
-        $btnCancel = $c['btnCancel']
-        $btnClose = $c['btnClose']
-        $brdTitleBar = $w.FindName("brdTitleBar")
-        if ($brdTitleBar) {
-            $brdTitleBar.Add_MouseLeftButtonDown({
-                    param($sender, $e)
-                    if ($e.ButtonState -eq [System.Windows.Input.MouseButtonState]::Pressed) { try { $w.DragMove() } catch {} }
-                })
-        }
-        $script:renameResult = $null
-        $w.Add_Loaded({ $txtInput.Focus(); $txtInput.SelectAll() })
-        $btnClose.Add_Click({ $script:renameResult = $null; $w.DialogResult = $false; $w.Close() })
-        $btnCancel.Add_Click({ $script:renameResult = $null; $w.DialogResult = $false; $w.Close() })
-        $w.Add_PreviewKeyDown({
-                param($sender, $e)
-                if ($e.Key -eq [System.Windows.Input.Key]::Escape) { $script:renameResult = $null; $w.DialogResult = $false; $w.Close() }
-            })
-        $btnOk.Add_Click({ $script:renameResult = $txtInput.Text; $w.DialogResult = $true; $w.Close() })
-        $result = $w.ShowDialog()
-        if ($result -eq $true) { return $script:renameResult }
-        return $null
-    } catch {
-        Write-Error "Error creando diálogo de renombrar: $($_.Exception.Message)"
-        return $null
-    }
-}
 function Show-MultipleResultSets {
     [CmdletBinding()]
     param(
@@ -805,28 +540,25 @@ function Show-MultipleResultSets {
     Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestañas restantes: $($TabControl.Items.Count)"
     if (-not $ResultSets -or $ResultSets.Count -eq 0) {
         $tab = New-Object System.Windows.Controls.TabItem
-
         $headerPanel = New-Object System.Windows.Controls.StackPanel
         $headerPanel.Orientation = "Horizontal"
-
         $iconText = New-Object System.Windows.Controls.TextBlock
         $iconText.Text = "📊"
         $iconText.Margin = "0,0,6,0"
-
+        $iconText.FontSize = 10
+        $iconText.Margin = "0,0,4,0"
         $titleText = New-Object System.Windows.Controls.TextBlock
         $titleText.Text = "Resultado"
+        $titleText.FontSize = 10
+        $titleText.Margin = "0"
         $titleText.VerticalAlignment = "Center"
-
         [void]$headerPanel.Children.Add($iconText)
         [void]$headerPanel.Children.Add($titleText)
         $tab.Header = $headerPanel
-
         $text = New-Object System.Windows.Controls.TextBlock
         $text.Text = "La consulta no devolvió resultados."
         $text.Margin = "10"
         $tab.Content = $text
-
-        # CRÍTICO: Insertar ANTES de Mensajes (índice 0)
         if ($messagesTab) {
             $TabControl.Items.Insert(0, $tab)
             Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña vacía insertada en índice 0 (antes de Mensajes)"
@@ -834,16 +566,12 @@ function Show-MultipleResultSets {
             [void]$TabControl.Items.Add($tab)
             Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña vacía agregada (no hay Mensajes)"
         }
-
-        # NO seleccionar - dejar que el código de mensajes seleccione Mensajes
         if ($global:lblRowCount) { $global:lblRowCount.Text = "📊 0" }
-
         Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] FIN (sin resultados)"
         return
     }
     $theme = $null
     try { $theme = Get-DzUiTheme } catch { $theme = $null }
-
     $isDark = $false
     try {
         if ($theme -and $theme.FormBackground) {
@@ -857,7 +585,6 @@ function Show-MultipleResultSets {
             }
         }
     } catch { $isDark = $false }
-
     $gridBg = $null
     $gridFg = $null
     $headerBg = $null
@@ -879,68 +606,71 @@ function Show-MultipleResultSets {
         $headerFg = [System.Windows.Media.Brushes]::Black
         $gridLine = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#D0D0D0")
     }
-
     $nullBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#FDFBAC")
     $nullFg = [System.Windows.Media.Brushes]::Black
-
     $hdrStyle = New-Object System.Windows.Style([System.Windows.Controls.Primitives.DataGridColumnHeader])
     [void]$hdrStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.Control]::BackgroundProperty, $headerBg)))
     [void]$hdrStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.Control]::ForegroundProperty, $headerFg)))
     [void]$hdrStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.Control]::HorizontalContentAlignmentProperty, [System.Windows.HorizontalAlignment]::Center)))
     [void]$hdrStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.Control]::VerticalContentAlignmentProperty, [System.Windows.VerticalAlignment]::Center)))
-    [void]$hdrStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.Control]::PaddingProperty, (New-Object System.Windows.Thickness(8, 4, 8, 4)))))
+    [void]$hdrStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.Control]::PaddingProperty, (New-Object System.Windows.Thickness(4, 2, 4, 2)))))
     [void]$hdrStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.Control]::BorderBrushProperty, $gridLine)))
     [void]$hdrStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.Control]::BorderThicknessProperty, (New-Object System.Windows.Thickness(0, 0, 1, 1)))))
-
+    $rowHdrStyle = New-Object System.Windows.Style([System.Windows.Controls.Primitives.DataGridRowHeader])
+    [void]$rowHdrStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.Control]::BackgroundProperty, $headerBg)))
+    [void]$rowHdrStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.Control]::ForegroundProperty, $headerFg)))
+    [void]$rowHdrStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.Control]::HorizontalContentAlignmentProperty, [System.Windows.HorizontalAlignment]::Center)))
+    [void]$rowHdrStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.Control]::VerticalContentAlignmentProperty, [System.Windows.VerticalAlignment]::Center)))
+    [void]$rowHdrStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.Control]::BorderBrushProperty, $gridLine)))
+    [void]$rowHdrStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.Control]::BorderThicknessProperty, (New-Object System.Windows.Thickness(0, 0, 1, 1)))))
+    [void]$rowHdrStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.FrameworkElement]::WidthProperty, [double]::NaN)))
     $cellStyle = New-Object System.Windows.Style([System.Windows.Controls.DataGridCell])
-    [void]$cellStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.Control]::PaddingProperty, (New-Object System.Windows.Thickness(8, 2, 8, 2)))))
+    [void]$cellStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.Control]::PaddingProperty, (New-Object System.Windows.Thickness(4, 1, 4, 1)))))
     [void]$cellStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.Control]::BorderBrushProperty, $gridLine)))
     [void]$cellStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.Control]::BorderThicknessProperty, (New-Object System.Windows.Thickness(0, 0, 1, 1)))))
-    [void]$cellStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.Control]::HorizontalContentAlignmentProperty, [System.Windows.HorizontalAlignment]::Stretch)))
+    [void]$cellStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.Control]::HorizontalContentAlignmentProperty, [System.Windows.HorizontalAlignment]::Center)))
     [void]$cellStyle.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.Control]::VerticalContentAlignmentProperty, [System.Windows.VerticalAlignment]::Center)))
-
     $textStyleBase = New-Object System.Windows.Style([System.Windows.Controls.TextBlock])
     [void]$textStyleBase.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.TextBlock]::TextTrimmingProperty, [System.Windows.TextTrimming]::CharacterEllipsis)))
     [void]$textStyleBase.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.TextBlock]::TextWrappingProperty, [System.Windows.TextWrapping]::NoWrap)))
     [void]$textStyleBase.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.TextBlock]::VerticalAlignmentProperty, [System.Windows.VerticalAlignment]::Center)))
-
     $tNull = New-Object System.Windows.Trigger
     $tNull.Property = [System.Windows.Controls.TextBlock]::TextProperty
     $tNull.Value = "NULL"
     [void]$tNull.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.TextBlock]::BackgroundProperty, $nullBrush)))
     [void]$tNull.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.TextBlock]::ForegroundProperty, $nullFg)))
     [void]$textStyleBase.Triggers.Add($tNull)
-
     $i = 0
     foreach ($rs in $ResultSets) {
         $i++
         $tab = New-Object System.Windows.Controls.TabItem
         $rowCount = if ($rs.RowCount -ne $null) { $rs.RowCount } else { $rs.DataTable.Rows.Count }
-
         $headerPanel = New-Object System.Windows.Controls.StackPanel
         $headerPanel.Orientation = "Horizontal"
-
         $iconText = New-Object System.Windows.Controls.TextBlock
+        #dgResults construyendo la pestaña de resultados:
         $iconText.Text = "📊"
         $iconText.Margin = "0,0,6,0"
-
+        $iconText.FontSize = 10
+        $iconText.Margin = "0,0,4,0"
         $titleText = New-Object System.Windows.Controls.TextBlock
         $titleText.Text = "Resultado $i ($rowCount filas)"
         $titleText.VerticalAlignment = "Center"
-
+        $titleText.FontSize = 10
+        $titleText.Margin = "0"
         [void]$headerPanel.Children.Add($iconText)
         [void]$headerPanel.Children.Add($titleText)
         $tab.Header = $headerPanel
-
         $dg = New-Object System.Windows.Controls.DataGrid
         $dg.AutoGenerateColumns = $true
         $dg.ItemsSource = $rs.DataTable.DefaultView
         $dg.IsReadOnly = $true
         $dg.CanUserAddRows = $false
         $dg.CanUserDeleteRows = $false
+        $dg.SelectionUnit = "CellOrRowHeader"
         $dg.SelectionMode = "Extended"
-        $dg.HeadersVisibility = "Column"
-        $dg.GridLinesVisibility = "All"
+        $dg.HeadersVisibility = "All"
+        $dg.GridLinesVisibility = "None"
         $dg.HorizontalGridLinesBrush = $gridLine
         $dg.VerticalGridLinesBrush = $gridLine
         $dg.Background = $gridBg
@@ -949,21 +679,241 @@ function Show-MultipleResultSets {
         $dg.AlternatingRowBackground = $rowAlt
         $dg.BorderBrush = $gridLine
         $dg.BorderThickness = "1"
-        $dg.RowHeight = 26
-        $dg.ColumnHeaderHeight = 28
+        #NUEVOS TAMAÑOS
+        $dg.FontSize = 10
+        $dg.RowHeight = 20
+        $dg.ColumnHeaderHeight = 22
+        $dg.RowHeaderWidth = 38
         $dg.HorizontalScrollBarVisibility = "Auto"
         $dg.VerticalScrollBarVisibility = "Auto"
         $dg.CanUserResizeColumns = $true
         $dg.CanUserSortColumns = $true
         $dg.AlternationCount = 2
         $dg.ColumnHeaderStyle = $hdrStyle
+        $dg.RowHeaderStyle = $rowHdrStyle
         $dg.CellStyle = $cellStyle
-
+        $dg.Add_LoadingRow({
+                param($s, $e)
+                try {
+                    $e.Row.Header = ($e.Row.GetIndex() + 1).ToString()
+                } catch {
+                    Write-DzDebug "`t[DEBUG][DataGrid] Error en LoadingRow: $_"
+                }
+            })
+        $CopyToClipboard = {
+            param([bool]$IncludeHeaders)
+            try {
+                $grid = $dg
+                $sb = New-Object System.Text.StringBuilder
+                $visibleCols = @($grid.Columns | Where-Object { $_.Visibility -eq 'Visible' } | Sort-Object DisplayIndex)
+                if ($grid.SelectedItems -and $grid.SelectedItems.Count -gt 0) {
+                    $columns = $visibleCols
+                    if ($IncludeHeaders) {
+                        $headers = foreach ($col in $columns) {
+                            $h = if ($col.Header -is [string]) { $col.Header } elseif ($col.Header) { $col.Header.ToString() } else { "" }
+                            ($h -replace '__', '_' -replace "`t", " ")
+                        }
+                        [void]$sb.AppendLine(($headers -join "`t"))
+                    }
+                    foreach ($row in @($grid.SelectedItems)) {
+                        $values = foreach ($col in $columns) {
+                            $propName = $null
+                            if ($col -is [System.Windows.Controls.DataGridBoundColumn]) {
+                                $binding = $col.Binding
+                                if ($binding -and $binding.Path) { $propName = $binding.Path.Path }
+                            }
+                            if (-not $propName -and $col.SortMemberPath) { $propName = $col.SortMemberPath }
+                            if (-not $propName -and $col.Header) {
+                                $h2 = $col.Header
+                                $propName = if ($h2 -is [string]) { ($h2 -replace '__', '_') } else { $h2.ToString() }
+                            }
+                            $cellValue = ""
+                            try {
+                                $val = $null
+                                if ($row -is [System.Data.DataRowView]) { $val = $row[$propName] }
+                                elseif ($row.PSObject.Properties[$propName]) { $val = $row.PSObject.Properties[$propName].Value }
+                                else { $val = $row.$propName }
+                                if ($null -eq $val -or $val -is [System.DBNull]) { $cellValue = "NULL" }
+                                elseif ($val -is [datetime]) { $cellValue = ([datetime]$val).ToString("yyyy-MM-dd HH:mm:ss.fff") }
+                                elseif ($val -is [bool]) { $cellValue = if ($val) { "True" } else { "False" } }
+                                else { $cellValue = $val.ToString() }
+                            } catch { $cellValue = "" }
+                            $cellValue -replace "`t", " " -replace "`r`n", " " -replace "`n", " " -replace "`r", " "
+                        }
+                        [void]$sb.AppendLine(($values -join "`t"))
+                    }
+                    $textToCopy = $sb.ToString().TrimEnd("`r", "`n")
+                    [System.Windows.Clipboard]::SetText($textToCopy)
+                    $headerMsg = if ($IncludeHeaders) { "con encabezados" } else { "sin encabezados" }
+                    Write-DzDebug "`t[DEBUG][DataGrid] ✓ Copiado: $($grid.SelectedItems.Count) filas × $($columns.Count) columnas ($headerMsg)"
+                    #Write-DzDebug "`t[DEBUG][DataGrid] Texto copiado:`n$textToCopy"
+                    return
+                }
+                if ((-not $grid.SelectedItems -or $grid.SelectedItems.Count -eq 0) -and
+                    ($grid.SelectedCells -and $grid.SelectedCells.Count -gt 0)) {
+                    $rowsFromCells = @(
+                        $grid.SelectedCells |
+                        Select-Object -ExpandProperty Item -Unique
+                    )
+                    if ($grid.SelectedCells.Count -eq 1) {
+                        $row = $rowsFromCells[0]
+                        $columns = $visibleCols
+                        if ($IncludeHeaders) {
+                            $headers = foreach ($col in $columns) {
+                                $h = if ($col.Header -is [string]) { $col.Header } elseif ($col.Header) { $col.Header.ToString() } else { "" }
+                                ($h -replace '__', '_' -replace "`t", " ")
+                            }
+                            [void]$sb.AppendLine(($headers -join "`t"))
+                        }
+                        $values = foreach ($col in $columns) {
+                            $propName = $null
+                            if ($col -is [System.Windows.Controls.DataGridBoundColumn]) {
+                                $binding = $col.Binding
+                                if ($binding -and $binding.Path) { $propName = $binding.Path.Path }
+                            }
+                            if (-not $propName -and $col.SortMemberPath) { $propName = $col.SortMemberPath }
+                            if (-not $propName -and $col.Header) {
+                                $h2 = $col.Header
+                                $propName = if ($h2 -is [string]) { (($h2 -replace '__', '_')) } else { ($h2.ToString() -replace '__', '_') }
+                            }
+                            $cellValue = ""
+                            try {
+                                $val = $null
+                                if ($row -is [System.Data.DataRowView]) { $val = $row[$propName] }
+                                elseif ($row.PSObject.Properties[$propName]) { $val = $row.PSObject.Properties[$propName].Value }
+                                else { $val = $row.$propName }
+                                if ($null -eq $val -or $val -is [System.DBNull]) { $cellValue = "NULL" }
+                                elseif ($val -is [datetime]) { $cellValue = ([datetime]$val).ToString("yyyy-MM-dd HH:mm:ss.fff") }
+                                elseif ($val -is [bool]) { $cellValue = if ($val) { "True" } else { "False" } }
+                                else { $cellValue = $val.ToString() }
+                            } catch { $cellValue = "" }
+                            $cellValue -replace "`t", " " -replace "`r`n", " " -replace "`n", " " -replace "`r", " "
+                        }
+                        [void]$sb.AppendLine(($values -join "`t"))
+                        $textToCopy = $sb.ToString().TrimEnd("`r", "`n")
+                        [System.Windows.Clipboard]::SetText($textToCopy)
+                        $headerMsg = if ($IncludeHeaders) { "con encabezados" } else { "sin encabezados" }
+                        Write-DzDebug "`t[DEBUG][DataGrid] ✓ Copiado (por celda en 1 fila): 1 filas × $($columns.Count) columnas ($headerMsg)"
+                        #Write-DzDebug "`t[DEBUG][DataGrid] Texto copiado:`n$textToCopy"
+                        return
+                    }
+                }
+                # 2) Si NO hay filas seleccionadas, copiar por CELDAS (usar copiado nativo del DataGrid)
+                if (-not $grid.SelectedCells -or $grid.SelectedCells.Count -eq 0) { return }
+                $oldMode = $grid.ClipboardCopyMode
+                try {
+                    if ($IncludeHeaders) {
+                        $grid.ClipboardCopyMode = [System.Windows.Controls.DataGridClipboardCopyMode]::IncludeHeader
+                    } else {
+                        $grid.ClipboardCopyMode = [System.Windows.Controls.DataGridClipboardCopyMode]::ExcludeHeader
+                    }
+                    [System.Windows.Input.ApplicationCommands]::Copy.Execute($null, $grid)
+                    $textToCopy = [System.Windows.Clipboard]::GetText()
+                    if ($null -eq $textToCopy) { $textToCopy = "" }
+                    $textToCopy = $textToCopy.TrimEnd("`r", "`n")
+                    if ([string]::IsNullOrWhiteSpace($textToCopy)) { return }
+                    [System.Windows.Clipboard]::SetText($textToCopy)
+                    $headerMsg = if ($IncludeHeaders) { "con encabezados" } else { "sin encabezados" }
+                    Write-DzDebug "`t[DEBUG][DataGrid] ✓ Copiado (nativo): celdas seleccionadas ($headerMsg)"
+                    #Write-DzDebug "`t[DEBUG][DataGrid] Texto copiado:`n$textToCopy"
+                    return
+                } catch {
+                    Write-DzDebug "`t[DEBUG][DataGrid] Error en copiar (nativo): $_" -Color Red
+                    return
+                } finally {
+                    # Volver al modo anterior SIEMPRE
+                    $grid.ClipboardCopyMode = $oldMode
+                }
+                $selectedCells = @(
+                    $grid.SelectedCells |
+                    Sort-Object -Property @{ Expression = { $_.Item } }, @{ Expression = { $_.Column.DisplayIndex } }
+                )
+                if ($selectedCells.Count -eq 0) { return }
+                $rowGroups = @($selectedCells | Group-Object -Property { $_.Item })
+                $columns = @($selectedCells | Select-Object -ExpandProperty Column -Unique | Sort-Object DisplayIndex)
+                if ($IncludeHeaders) {
+                    $headers = foreach ($col in $columns) {
+                        $h = if ($col.Header -is [string]) { $col.Header } elseif ($col.Header) { $col.Header.ToString() } else { "" }
+                        ($h -replace '__', '_' -replace "`t", " ")
+                    }
+                    [void]$sb.AppendLine(($headers -join "`t"))
+                }
+                foreach ($rg in $rowGroups) {
+                    $row = $rg.Group[0].Item
+                    $values = foreach ($col in $columns) {
+                        $cellFound = $rg.Group | Where-Object { $_.Column -eq $col } | Select-Object -First 1
+                        if (-not $cellFound) { "" ; continue }
+                        $propName = $null
+                        if ($col -is [System.Windows.Controls.DataGridBoundColumn]) {
+                            $binding = $col.Binding
+                            if ($binding -and $binding.Path) { $propName = $binding.Path.Path }
+                        }
+                        if (-not $propName -and $col.SortMemberPath) { $propName = $col.SortMemberPath }
+                        if (-not $propName -and $col.Header) {
+                            $h2 = $col.Header
+                            $propName = if ($h2 -is [string]) { ($h2 -replace '__', '_') } else { $h2.ToString() }
+                        }
+                        $cellValue = ""
+                        try {
+                            $val = $null
+                            if ($row -is [System.Data.DataRowView]) { $val = $row[$propName] }
+                            elseif ($row.PSObject.Properties[$propName]) { $val = $row.PSObject.Properties[$propName].Value }
+                            else { $val = $row.$propName }
+                            if ($null -eq $val -or $val -is [System.DBNull]) { $cellValue = "NULL" }
+                            elseif ($val -is [datetime]) { $cellValue = ([datetime]$val).ToString("yyyy-MM-dd HH:mm:ss.fff") }
+                            elseif ($val -is [bool]) { $cellValue = if ($val) { "True" } else { "False" } }
+                            else { $cellValue = $val.ToString() }
+                        } catch { $cellValue = "" }
+                        $cellValue -replace "`t", " " -replace "`r`n", " " -replace "`n", " " -replace "`r", " "
+                    }
+                    [void]$sb.AppendLine(($values -join "`t"))
+                }
+                $textToCopy = $sb.ToString().TrimEnd("`r", "`n")
+                [System.Windows.Clipboard]::SetText($textToCopy)
+                $headerMsg = if ($IncludeHeaders) { "con encabezados" } else { "sin encabezados" }
+                Write-DzDebug "`t[DEBUG][DataGrid] ✓ Copiado: $($rowGroups.Count) filas × $($columns.Count) columnas ($headerMsg)"
+                #Write-DzDebug "`t[DEBUG][DataGrid] Texto copiado:`n$textToCopy"
+            } catch {
+                Write-DzDebug "`t[DEBUG][DataGrid] Error en copiar: $_" -Color Red
+            }
+        }.GetNewClosure()
+        $copyFn = $CopyToClipboard
+        $dg.Add_PreviewKeyDown({
+                param($s, $e)
+                $isCtrl = ([System.Windows.Input.Keyboard]::Modifiers -band [System.Windows.Input.ModifierKeys]::Control) -ne 0
+                $isShift = ([System.Windows.Input.Keyboard]::Modifiers -band [System.Windows.Input.ModifierKeys]::Shift) -ne 0
+                if ($e.Key -eq [System.Windows.Input.Key]::C -and $isCtrl -and $isShift) {
+                    $copyFn.Invoke($true)
+                    $e.Handled = $true
+                } elseif ($e.Key -eq [System.Windows.Input.Key]::C -and $isCtrl) {
+                    $copyFn.Invoke($false)
+                    $e.Handled = $true
+                } elseif ($e.Key -eq [System.Windows.Input.Key]::A -and $isCtrl) {
+                    $s.SelectAllCells()
+                    $e.Handled = $true
+                }
+            }.GetNewClosure())
+        $contextMenu = New-Object System.Windows.Controls.ContextMenu
+        $menuCopy = New-Object System.Windows.Controls.MenuItem
+        $menuCopy.Header = "Copiar                                    Ctrl+C"
+        $menuCopy.Add_Click({ & $CopyToClipboard $false }.GetNewClosure())
+        [void]$contextMenu.Items.Add($menuCopy)
+        $menuCopyHeaders = New-Object System.Windows.Controls.MenuItem
+        $menuCopyHeaders.Header = "Copiar con encabezados       Ctrl+Shift+C"
+        $menuCopyHeaders.Add_Click({ & $CopyToClipboard $true }.GetNewClosure())
+        [void]$contextMenu.Items.Add($menuCopyHeaders)
+        [void]$contextMenu.Items.Add((New-Object System.Windows.Controls.Separator))
+        $menuSelectAll = New-Object System.Windows.Controls.MenuItem
+        $menuSelectAll.Header = "Seleccionar todo                  Ctrl+A"
+        $menuSelectAll.Add_Click({ $dg.SelectAllCells() }.GetNewClosure())
+        [void]$contextMenu.Items.Add($menuSelectAll)
+        $dg.ContextMenu = $contextMenu
         $dg.Add_AutoGeneratingColumn({
                 param($s, $e)
                 $prop = $e.PropertyName
-                $hdr = $e.Column.Header
-
+                $hdr = [string]$e.Column.Header
+                $hdr = $hdr -replace '_', '__'
+                $e.Column.Header = $hdr
                 if ($e.PropertyType -eq [datetime]) {
                     $col = New-Object System.Windows.Controls.DataGridTextColumn
                     $col.Header = $hdr
@@ -985,7 +935,6 @@ function Show-MultipleResultSets {
                     }
                     return
                 }
-
                 if ($e.PropertyType -in @([int], [long], [decimal], [double], [single])) {
                     if ($e.Column -is [System.Windows.Controls.DataGridTextColumn]) {
                         $b = $e.Column.Binding
@@ -994,7 +943,7 @@ function Show-MultipleResultSets {
                         $e.Column.Binding = $b
                         $ts = New-Object System.Windows.Style([System.Windows.Controls.TextBlock])
                         $ts.BasedOn = $textStyleBase
-                        [void]$ts.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.TextBlock]::TextAlignmentProperty, [System.Windows.TextAlignment]::Right)))
+                        [void]$ts.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.TextBlock]::TextAlignmentProperty, [System.Windows.TextAlignment]::Center)))
                         $e.Column.ElementStyle = $ts
                     }
                     return
@@ -1026,15 +975,12 @@ function Show-MultipleResultSets {
                             $dpi = 96.0 * $src.CompositionTarget.TransformToDevice.M11
                         }
                     } catch { $dpi = 96.0 }
-
                     $typeface = New-Object System.Windows.Media.Typeface($s.FontFamily, $s.FontStyle, $s.FontWeight, $s.FontStretch)
                     $fontSize = [double]$s.FontSize
-
                     foreach ($col in $s.Columns) {
                         $col.MinWidth = $min
                         $col.MaxWidth = $max
                     }
-
                     $s.Dispatcher.BeginInvoke([action] {
                             try {
                                 $s.UpdateLayout()
@@ -1044,11 +990,9 @@ function Show-MultipleResultSets {
                                     if ([string]::IsNullOrWhiteSpace($prop)) {
                                         try { $prop = $col.Header.ToString() } catch { $prop = $null }
                                     }
-
                                     $best = 0.0
                                     $hText = ""
                                     try { $hText = [string]$col.Header } catch { $hText = "" }
-
                                     if (-not [string]::IsNullOrEmpty($hText)) {
                                         $ftH = New-Object System.Windows.Media.FormattedText(
                                             $hText,
@@ -1061,14 +1005,12 @@ function Show-MultipleResultSets {
                                         )
                                         $best = [Math]::Max($best, $ftH.WidthIncludingTrailingWhitespace)
                                     }
-
                                     $count = 0
                                     if ($dt -and $prop -and $dt.Columns.Contains($prop)) {
                                         foreach ($row in $dt.Rows) {
                                             if ($count -ge $sampleMax) { break }
                                             $val = $row[$prop]
                                             $txt = $null
-
                                             if ($null -eq $val -or $val -is [System.DBNull]) {
                                                 $txt = "NULL"
                                             } else {
@@ -1078,7 +1020,6 @@ function Show-MultipleResultSets {
                                                     $txt = [string]$val
                                                 }
                                             }
-
                                             if (-not [string]::IsNullOrEmpty($txt)) {
                                                 $ft = New-Object System.Windows.Media.FormattedText(
                                                     $txt,
@@ -1098,7 +1039,6 @@ function Show-MultipleResultSets {
                                     } else {
                                         $best = [Math]::Max($best, 120.0)
                                     }
-
                                     $w = [Math]::Ceiling($best + $pad)
                                     if ($w -lt $col.MinWidth) { $w = $col.MinWidth }
                                     if ($w -gt $col.MaxWidth) { $w = $col.MaxWidth }
@@ -1116,11 +1056,8 @@ function Show-MultipleResultSets {
             [void]$TabControl.Items.Add($tab)
             Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña $i agregada (no hay Mensajes)"
         }
-
         Write-Host "`tPestaña $i creada con $rowCount filas" -ForegroundColor Green
     }
-
-    # ========== PASO 6: Actualizar contador y seleccionar pestaña ==========
     if ($global:lblRowCount) {
         $totalRows = ($ResultSets | Measure-Object -Property RowCount -Sum).Sum
         if ($ResultSets.Count -eq 1) {
@@ -1129,15 +1066,11 @@ function Show-MultipleResultSets {
             $global:lblRowCount.Text = "📊 $totalRows ($($ResultSets.Count) resultsets)"
         }
     }
-
-    # Seleccionar primera pestaña de resultados (NO Mensajes)
     $TabControl.SelectedIndex = 0
-
     Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestañas totales: $($TabControl.Items.Count)"
     Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña seleccionada: índice $($TabControl.SelectedIndex)"
     Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] FIN"
 }
-
 function Export-ResultSetToCsv {
     [CmdletBinding()]
     param(
@@ -1192,24 +1125,6 @@ function Export-ResultSetToDelimitedText {
     } finally {
         $writer.Dispose()
     }
-}
-function Get-TextPointerAtOffset {
-    param(
-        [Parameter(Mandatory)][System.Windows.Documents.TextPointer]$Start,
-        [Parameter(Mandatory)][int]$Offset
-    )
-    $navigator = $Start
-    $count = 0
-    while ($navigator -ne $null) {
-        if ($navigator.GetPointerContext([System.Windows.Documents.LogicalDirection]::Forward) -eq [System.Windows.Documents.TextPointerContext]::Text) {
-            $run = $navigator.GetTextInRun([System.Windows.Documents.LogicalDirection]::Forward)
-            $remaining = $Offset - $count
-            if ($remaining -le $run.Length) { return $navigator.GetPositionAtOffset($remaining) }
-            $count += $run.Length
-        }
-        $navigator = $navigator.GetNextContextPosition([System.Windows.Documents.LogicalDirection]::Forward)
-    }
-    return $Start
 }
 function Get-PredefinedQueries {
     return @{
@@ -1422,39 +1337,23 @@ WHERE
         "SR SYNC | Renovar NSPlatformControl"             = @"
 /*  SE RECOMIENDA RESPALDAR LA BASE DE DATOS ANTES DE EJECUTAR ESTA CONSULTA
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
-DELETE FROM dbo.nsplatformcontrol;
-UPDATE dbo.grupos
-    SET WorkspaceId = NEWID();
-UPDATE dbo.subgrupos
-    SET WorkspaceId = NEWID();
-UPDATE dbo.gruposmodificadores
-    SET WorkspaceId = NEWID();
-UPDATE dbo.comentarios
-    SET IdComentario = NEWID();
-UPDATE dbo.udsmedida
-    SET WorkspaceId = NEWID();
-UPDATE dbo.productos
-    SET WorkspaceId = NEWID();
-UPDATE dbo.modificadores
-    SET WorkspaceId = NEWID();
-UPDATE dbo.areasrestaurant
-    SET WorkspaceId = NEWID();
-UPDATE dbo.estaciones
-    SET WorkspaceId = NEWID();
-UPDATE dbo.formasdepago
-    SET WorkspaceId = NEWID();
-UPDATE dbo.usuarios
-    SET WorkspaceId = NEWID();
-UPDATE dbo.turnos
-    SET WorkspaceId = NEWID();
-UPDATE dbo.mesas
-    SET WorkspaceId = NEWID();
-UPDATE dbo.gruposmodificadoresproductos
-    SET Id = NEWID();
-UPDATE dbo.gruposmodificadoresproductos
-    SET WorkspaceId = Id;
-UPDATE dbo.declaracioncajero
-    SET WorkspaceId = NEWID();
+DELETE FROM nsplatformcontrol;
+UPDATE grupos                           SET WorkspaceId = NEWID() WHERE 1=1;
+UPDATE subgrupos                        SET WorkspaceId = NEWID() WHERE 1=1;
+UPDATE gruposmodificadores              SET WorkspaceId = NEWID() WHERE 1=1;
+UPDATE comentarios                      SET IdComentario = NEWID() WHERE 1=1;
+UPDATE udsmedida                        SET WorkspaceId = NEWID() WHERE 1=1;
+UPDATE productos                        SET WorkspaceId = NEWID() WHERE 1=1;
+UPDATE modificadores                    SET WorkspaceId = NEWID() WHERE 1=1;
+UPDATE areasrestaurant                  SET WorkspaceId = NEWID() WHERE 1=1;
+UPDATE estaciones                       SET WorkspaceId = NEWID() WHERE 1=1;
+UPDATE formasdepago                     SET WorkspaceId = NEWID() WHERE 1=1;
+UPDATE usuarios                         SET WorkspaceId = NEWID() WHERE 1=1;
+UPDATE turnos                           SET WorkspaceId = NEWID() WHERE 1=1;
+UPDATE mesas                            SET WorkspaceId = NEWID() WHERE 1=1;
+UPDATE gruposmodificadoresproductos     SET id          = NEWID() WHERE 1=1;
+UPDATE gruposmodificadoresproductos     SET WorkspaceId = Id WHERE 1=1;
+UPDATE dbo.declaracioncajero            SET WorkspaceId = NEWID() WHERE 1=1;
 "@
     }
 }
@@ -1470,82 +1369,6 @@ function Get-DzThemeBrush {
         return $brush
     } catch {
         return $Fallback
-    }
-}
-function Initialize-PredefinedQueries {
-    param(
-        [Parameter(Mandatory = $true)][System.Windows.Controls.ComboBox]$ComboQueries,
-        [Parameter(Mandatory = $true)][System.Windows.Controls.TabControl]$TabControl,
-        [Parameter(Mandatory = $true)][hashtable]$Queries
-    )
-    $ComboQueries.Items.Clear()
-    [void]$ComboQueries.Items.Add("Selecciona una consulta predefinida")
-    foreach ($key in ($Queries.Keys | Sort-Object)) { [void]$ComboQueries.Items.Add($key) }
-    $ComboQueries.SelectedIndex = 0
-    $ComboQueries.Tag = [pscustomobject]@{
-        Queries     = $Queries
-        TabControl  = $TabControl
-        SqlKeywords = $global:DzSqlKeywords
-    }
-    $ComboQueries.Add_SelectionChanged({
-            param($sender, $e)
-            try {
-                $selectedQuery = $sender.SelectedItem
-                if (-not $selectedQuery -or $selectedQuery -eq "Selecciona una consulta predefinida") { return }
-                $ctx = $sender.Tag
-                if (-not $ctx -or -not $ctx.Queries.ContainsKey($selectedQuery)) { return }
-                $editor = Get-ActiveQueryRichTextBox -TabControl $ctx.TabControl
-                if (-not $editor) { return }
-                $queryText = $ctx.Queries[$selectedQuery]
-                Set-SqlEditorText -Editor $editor -Text $queryText
-                $editor.Focus()
-            } catch {
-                Write-DzDebug "`t[DEBUG] Error en SelectionChanged (queries): $($_.Exception.Message)" -Color Red
-            }
-        })
-}
-function Set-WpfSqlHighlighting {
-    param(
-        [Parameter(Mandatory)][System.Windows.Controls.RichTextBox]$RichTextBox,
-        [Parameter(Mandatory)][string]$Keywords
-    )
-    if ($null -eq $RichTextBox -or $null -eq $RichTextBox.Document) { return }
-    if ([string]::IsNullOrWhiteSpace($Keywords)) { return }
-    $theme = Get-DzUiTheme
-    $defaultBrush = Get-DzThemeBrush -Hex $theme.ControlForeground -Fallback ([System.Windows.Media.Brushes]::Black)
-    $commentBrush = Get-DzThemeBrush -Hex $theme.AccentMuted -Fallback ([System.Windows.Media.Brushes]::DarkGreen)
-    $keywordBrush = Get-DzThemeBrush -Hex $theme.AccentPrimary -Fallback ([System.Windows.Media.Brushes]::Blue)
-    $range = New-Object System.Windows.Documents.TextRange($RichTextBox.Document.ContentStart, $RichTextBox.Document.ContentEnd)
-    $text = $range.Text
-    if ([string]::IsNullOrWhiteSpace($text)) { return }
-    $range.ApplyPropertyValue([System.Windows.Documents.TextElement]::ForegroundProperty, $defaultBrush)
-    $commentRanges = @()
-    foreach ($c in [regex]::Matches($text, '--.*', [System.Text.RegularExpressions.RegexOptions]::Multiline)) {
-        $start = Get-TextPointerFromOffset -RichTextBox $RichTextBox -Offset $c.Index
-        $end = Get-TextPointerFromOffset -RichTextBox $RichTextBox -Offset ($c.Index + $c.Length)
-        if ($start -and $end) {
-            (New-Object System.Windows.Documents.TextRange($start, $end)).ApplyPropertyValue([System.Windows.Documents.TextElement]::ForegroundProperty, $commentBrush)
-            $commentRanges += [pscustomobject]@{ Start = $c.Index; End = $c.Index + $c.Length }
-        }
-    }
-    foreach ($b in [regex]::Matches($text, '/\*[\s\S]*?\*/', [System.Text.RegularExpressions.RegexOptions]::Multiline)) {
-        $start = Get-TextPointerFromOffset -RichTextBox $RichTextBox -Offset $b.Index
-        $end = Get-TextPointerFromOffset -RichTextBox $RichTextBox -Offset ($b.Index + $b.Length)
-        if ($start -and $end) {
-            (New-Object System.Windows.Documents.TextRange($start, $end)).ApplyPropertyValue([System.Windows.Documents.TextElement]::ForegroundProperty, $commentBrush)
-            $commentRanges += [pscustomobject]@{ Start = $b.Index; End = $b.Index + $b.Length }
-        }
-    }
-    $pattern = '\b(' + $Keywords + ')\b'
-    $matches = [regex]::Matches($text, $pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-    foreach ($m in $matches) {
-        $inComment = $commentRanges | Where-Object { $m.Index -ge $_.Start -and $m.Index -lt $_.End }
-        if ($inComment) { continue }
-        $start = Get-TextPointerFromOffset -RichTextBox $RichTextBox -Offset $m.Index
-        $end = Get-TextPointerFromOffset -RichTextBox $RichTextBox -Offset ($m.Index + $m.Length)
-        if ($start -and $end) {
-            (New-Object System.Windows.Documents.TextRange($start, $end)).ApplyPropertyValue([System.Windows.Documents.TextElement]::ForegroundProperty, $keywordBrush)
-        }
     }
 }
 function Get-TextPointerFromOffset {
@@ -1623,118 +1446,6 @@ function Get-ExportableResultTabs {
         }
     }
     return $exportable
-}
-function Write-DataTableConsole {
-    param(
-        [Parameter(Mandatory)][System.Data.DataTable]$DataTable,
-        [int]$MaxRows = 50
-    )
-    if (-not $DataTable) { return }
-    $rows = @($DataTable.Rows)
-    $cols = @($DataTable.Columns | ForEach-Object { $_.ColumnName })
-    Write-Host ""
-    Write-Host ("Columnas: {0} | Filas: {1}" -f $cols.Count, $rows.Count) -ForegroundColor DarkGray
-    $sample = $rows | Select-Object -First $MaxRows
-    $width = @{}
-    foreach ($c in $cols) { $width[$c] = [Math]::Max($c.Length, 4) }
-    foreach ($r in $sample) {
-        foreach ($c in $cols) {
-            $v = $r[$c]
-            if ($v -is [DBNull]) { $v = $null }
-            $s = if ($null -eq $v) { "NULL" } else { [string]$v }
-            if ($s.Length -gt 80) { $s = $s.Substring(0, 77) + "..." }
-            $width[$c] = [Math]::Min(80, [Math]::Max($width[$c], $s.Length))
-        }
-    }
-    $header = ($cols | ForEach-Object { $_.PadRight($width[$_] + 2) }) -join ""
-    Write-Host $header -ForegroundColor Cyan
-    Write-Host ("-" * $header.Length) -ForegroundColor DarkGray
-    foreach ($r in $sample) {
-        $line = ($cols | ForEach-Object {
-                $v = $r[$_]
-                if ($v -is [DBNull]) { $v = $null }
-                $s = if ($null -eq $v) { "NULL" } else { [string]$v }
-                if ($s.Length -gt 80) { $s = $s.Substring(0, 77) + "..." }
-                $s.PadRight($width[$_] + 2)
-            }) -join ""
-        Write-Host $line
-    }
-    if ($rows.Count -gt $MaxRows) {
-        Write-Host ("... mostrando {0} de {1} filas (limite MaxRows={0})" -f $MaxRows, $rows.Count) -ForegroundColor Yellow
-    }
-}
-function Show-ErrorResultTab {
-    param(
-        [Parameter(Mandatory)][System.Windows.Controls.TabControl]$ResultsTabControl,
-        [Parameter(Mandatory)][string]$Message,
-        [Parameter()][switch]$AddWithoutClear
-    )
-    if (-not $AddWithoutClear) {
-        try {
-            $itemsToRemove = New-Object System.Collections.ArrayList
-            foreach ($item in $ResultsTabControl.Items) {
-                if ($item -isnot [System.Windows.Controls.TabItem]) { continue }
-                $header = $null
-                if ($item.Header -is [string]) {
-                    $header = $item.Header
-                } elseif ($item.Header -is [System.Windows.Controls.StackPanel]) {
-                    foreach ($child in $item.Header.Children) {
-                        if ($child -is [System.Windows.Controls.TextBlock]) {
-                            $header = $child.Text
-                            break
-                        }
-                    }
-                }
-                if (-not ($header -and $header -match "Mensajes")) {
-                    [void]$itemsToRemove.Add($item)
-                }
-            }
-            foreach ($item in $itemsToRemove) {
-                $ResultsTabControl.Items.Remove($item)
-            }
-        } catch {}
-    }
-    $tab = New-Object System.Windows.Controls.TabItem
-    $ht = New-Object System.Windows.Controls.TextBlock
-    $ht.Text = "Error"
-    $ht.VerticalAlignment = "Center"
-    $tab.Header = $ht
-    $text = New-Object System.Windows.Controls.TextBox
-    $text.Text = $Message
-    $text.Margin = "10"
-    $text.IsReadOnly = $true
-    $text.TextWrapping = "Wrap"
-    $text.VerticalScrollBarVisibility = "Auto"
-    $text.HorizontalScrollBarVisibility = "Auto"
-    $tab.Content = $text
-    $messagesTabIndex = -1
-    for ($i = 0; $i -lt $ResultsTabControl.Items.Count; $i++) {
-        $item = $ResultsTabControl.Items[$i]
-        if ($item -isnot [System.Windows.Controls.TabItem]) { continue }
-        $header = $null
-        if ($item.Header -is [string]) {
-            $header = $item.Header
-        } elseif ($item.Header -is [System.Windows.Controls.StackPanel]) {
-            foreach ($child in $item.Header.Children) {
-                if ($child -is [System.Windows.Controls.TextBlock]) {
-                    $header = $child.Text
-                    break
-                }
-            }
-        }
-        if ($header -and $header -match "Mensajes") {
-            $messagesTabIndex = $i
-            break
-        }
-    }
-    if ($messagesTabIndex -ge 0) {
-        $ResultsTabControl.Items.Insert($messagesTabIndex, $tab)
-    } else {
-        [void]$ResultsTabControl.Items.Add($tab)
-    }
-    if (-not $AddWithoutClear) {
-        $ResultsTabControl.SelectedIndex = 0
-    }
 }
 function Disconnect-DbCore {
     [CmdletBinding()]
@@ -2119,9 +1830,6 @@ function Export-ResultsCore {
 
     Ui-Info "Exportación completada en:`n$filePath" "Exportación" $Ctx.MainWindow
 }
-
-
-
 function Get-DbNameFromComboSelection {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$ComboBox)
@@ -2226,9 +1934,8 @@ function Connect-DbUiSafe {
 }
 Export-ModuleMember -Function @(
     'Invoke-SqlQuery', 'Invoke-SqlQueryMultiResultSet', 'Remove-SqlComments', 'Get-SqlDatabases', 'Get-SqlDatabasesInfo', 'Backup-Database', 'Connect-DbUiSafe', 'Disconnect-DbUiSafe', 'get-DbUiContext',
-    'Execute-SqlQuery', 'Show-ResultsConsole', 'Get-IniConnections', 'Load-IniConnectionsToComboBox', 'ConvertTo-DataTable',
+    'Execute-SqlQuery', 'Get-IniConnections', 'Load-IniConnectionsToComboBox',
     'Show-MultipleResultSets', 'Export-ResultSetToCsv', 'Export-ResultSetToDelimitedText',
-    'Get-TextPointerAtOffset',
-    'Get-PredefinedQueries', 'Initialize-PredefinedQueries', 'Remove-SqlComments', 'Set-WpfSqlHighlighting', 'Get-TextPointerFromOffset', 'Get-ResultTabHeaderText',
-    'Get-ExportableResultTabs', 'Write-DataTableConsole', 'Show-ErrorResultTab', 'Get-UseDatabaseFromQuery', 'Disconnect-DbCore', 'Connect-DbCore', 'Export-ResultsCore', 'Get-DbNameFromComboSelection'
+    'Get-PredefinedQueries', 'Remove-SqlComments', 'Get-TextPointerFromOffset', 'Get-ResultTabHeaderText',
+    'Get-ExportableResultTabs', 'Get-UseDatabaseFromQuery', 'Disconnect-DbCore', 'Connect-DbCore', 'Export-ResultsCore', 'Get-DbNameFromComboSelection'
 )

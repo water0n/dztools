@@ -1,140 +1,258 @@
-﻿@"
-# 🌟 Gerardo Zermeño Tools — Suite de Utilidades para Administración de Sistemas
+# Gerardo Zermeno Tools (dztools)
 
-**Gerardo Zermeño Tools (dztools)** es una herramienta en PowerShell con interfaz gráfica (Windows Forms), diseñada para facilitar tareas administrativas en Windows y SQL Server.
-Es ideal para técnicos de soporte, administradores de sistemas y desarrolladores que buscan automatizar operaciones comunes.
+[![CI](https://github.com/water0ff/dztools/actions/workflows/ci.yml/badge.svg)](https://github.com/water0ff/dztools/actions/workflows/ci.yml)
 
----
+Suite de utilidades para soporte tecnico, administracion de Windows y operaciones comunes con SQL Server. La aplicacion esta construida en PowerShell 5 con interfaz WPF y agrupa herramientas que normalmente se ejecutan por separado: diagnostico del equipo, gestion de conexiones SQL, consultas, respaldos, restauraciones, impresoras, firewall, instaladores y utilidades para entornos NationalSoft.
 
-## 🚀 Características Principales
+> Estado del proyecto: beta. Algunas funciones pueden modificar configuraciones del sistema, usuarios locales, firewall, servicios, impresoras o bases de datos. Ejecuta la herramienta solo si entiendes el alcance de la accion que vas a realizar.
 
-- 🖥 **Interfaz gráfica (GUI) en Windows Forms**
-- 🗄 **Conexión y administración de bases de datos SQL Server**
-- 🧰 **Módulos utilitarios para mantenimiento del sistema**
-- 💾 **Backup de bases de datos con un clic**
-- 🛠 **Instaladores automatizados**
-- 🖨 **Gestión rápida de impresoras**
-- 🧹 **Limpiadores del sistema (temp, liberador de espacio, WMI, etc.)**
-- 🔍 **Analizador de código, pruebas y CI automatizado en GitHub Actions**
+## Caracteristicas
 
----
+### Interfaz principal
 
-## 📦 Requisitos
+- Interfaz grafica WPF para Windows.
+- Modo oscuro y modo debug configurables.
+- Panel de informacion del equipo con hostname, puertos y estado de red.
+- Botones de acceso rapido para herramientas administrativas frecuentes.
+- Ventanas de progreso, mensajes y dialogos consistentes en toda la app.
 
-| Componente | Versión mínima |
-|-----------|----------------|
-| Windows   | Windows 10/11 o Windows Server 2016+ |
-| PowerShell | **5.0** (compatible con PS 5.1 del sistema) |
-| .NET Framework | 4.5 o superior |
-| SQL Server | Opcional (si se usan funciones de base de datos) |
+### SQL Server
 
----
+- Conexion a instancias SQL Server con usuario, contrasena y seleccion de base de datos.
+- Carga de conexiones guardadas desde archivos INI compatibles con entornos NationalSoft.
+- Explorador de servidor con bases de datos, tablas y columnas.
+- Consultas SQL en pestanas multiples.
+- Historial de consultas y restauracion de pestanas abiertas.
+- Consultas predefinidas para diagnostico y soporte.
+- Ejecucion de consultas con multiples result sets.
+- Panel de resultados y mensajes.
+- Exportacion de resultados a CSV o texto delimitado.
+- Deteccion y consulta de puertos SQL.
+- Acceso a herramientas relacionadas como SQL Server Management Studio, SQL Server Manager, Database4 y ExpressProfiler cuando estan disponibles.
 
-## 🔧 Instalación
+### Operaciones de bases de datos
 
-### 1️⃣ Clonar el repositorio
+- Respaldo de bases de datos.
+- Compresion opcional de respaldos con 7-Zip y contrasena.
+- Restauracion de respaldos con seleccion de rutas logicas.
+- Adjuntar bases de datos desde archivos MDF/LDF.
+- Separar bases de datos.
+- Visualizar tamanos de bases de datos.
+- Reparacion de bases de datos.
+- Crear, renombrar y eliminar bases de datos desde el explorador.
+- Explorador de carpetas del servidor SQL para seleccionar destinos de backup o restore.
+
+### Utilidades de Windows
+
+- Limpieza de archivos temporales.
+- Liberador de espacio en disco.
+- Actualizacion de datos del sistema.
+- Consulta y administracion de adaptadores de red.
+- Asignacion de IP fija, IP adicional o regreso a DHCP.
+- Configuracion de reglas de firewall de entrada y salida.
+- Creacion de usuarios locales como usuario estandar o administrador.
+- Limpieza de AnyDesk.
+- Consulta de componentes del sistema.
+
+### Impresoras
+
+- Listado de impresoras instaladas con puerto, driver y estado de comparticion.
+- Instalacion de impresoras, incluyendo escenarios por IP.
+- Limpieza y reinicio de la cola de impresion.
+- Acceso a Printer Tools.
+
+### Instaladores y herramientas portables
+
+- Instalacion y validacion de Chocolatey.
+- Busqueda, instalacion y desinstalacion de paquetes Chocolatey.
+- Validacion de dependencias como 7-Zip y MegaTools.
+- Instalador de SSMS.
+- Ejecucion de herramientas portables.
+- Busqueda de instaladores LZMA.
+- Descarga y expansion de archivos desde la interfaz.
+
+### Utilidades NationalSoft
+
+- Reporte de aplicaciones NationalSoft desde INI.
+- Cambio de configuracion OTM entre SQL y DBF.
+- Validacion y correccion de permisos en `C:\NationalSoft`.
+- Registro y desregistro de DLLs con `regsvr32`.
+- Extractor de instaladores.
+- Creacion de APK SRM.
+- Instaladores NS.
+- Monitor de servicios y logs.
+- Lector DP / permisos.
+
+## Requisitos
+
+| Componente | Requisito |
+| --- | --- |
+| Sistema operativo | Windows 10/11 o Windows Server 2016+ |
+| PowerShell | Windows PowerShell 5.0 o superior |
+| .NET | .NET Framework con soporte WPF |
+| SQL Server | Opcional, requerido solo para las funciones SQL |
+| Permisos | Administrador para funciones de sistema, firewall, usuarios, impresoras y algunos procesos SQL |
+
+Dependencias recomendadas para desarrollo:
+
+- `PSScriptAnalyzer` 1.22.0+
+- `Pester` 5.7.1+
+
+Estas dependencias estan documentadas en `requirements.psd1`.
+
+## Instalacion rapida
+
+Ejecuta PowerShell como administrador y lanza el instalador:
+
 ```powershell
 irm bit.ly/gdzTools | iex
 ```
 
-## 🎯 Uso básico
+El script descarga la ultima version publicada desde GitHub Releases, la instala en:
 
-Después de ejecutar tools.ps1:
+```text
+C:\temp\dztools\release
+```
 
-Selecciona la instancia SQL
+Despues valida la version local y ejecuta `main.ps1`.
 
-Ingresa usuario y contraseña
+## Instalacion manual
 
-Ejecuta consultas SQL directamente desde la GUI
+1. Descarga `dztools-release.zip` desde la seccion de releases del repositorio.
+2. Extrae el contenido en una carpeta local.
+3. Ejecuta:
 
-Realiza backups de manera rápida
+```powershell
+powershell -ExecutionPolicy Bypass -NoProfile -File .\main.ps1
+```
 
-Ejecuta tareas de mantenimiento del sistema
+Tambien puedes usar `run.bat` dentro del paquete release.
 
-Usa las herramientas adicionales del menú
+## Uso basico
 
+1. Acepta la advertencia beta al iniciar la herramienta.
+2. Revisa el panel de informacion del sistema.
+3. Para SQL Server, captura servidor, usuario y contrasena, despues presiona `Conectar`.
+4. Selecciona una base de datos o explora el arbol de objetos.
+5. Ejecuta consultas con `F5` o desde el boton de ejecucion.
+6. Usa los modulos laterales para tareas de Windows, impresoras, instaladores o NationalSoft.
 
-## 📁 Estructura del Proyecto
+## Estructura del proyecto
+
+```text
 dztools/
-│
-├── src/
-│   ├── main.ps1              → Archivo principal
-│   ├── tools.ps1             → Lanzador de la herramienta
-│   ├── version.json          → Versión actual del proyecto
-│   ├── modules/
-│   │     ├── GUI.psm1
-│   │     ├── Database.psm1
-│   │     ├── Utilities.psm1
-│   │     ├── Installers.psm1
-│   │
-│   └── forms/ (opcional)     → Formularios adicionales
-│
-├── tests/
-│   └── Basic.Tests.ps1       → Pruebas automáticas (Pester v5)
-│
-├── .github/
-│   └── workflows/
-│         └── ci.yml          → CI: Análisis, pruebas y empaquetado
-│
-└── requirements.psd1         → Dependencias del proyecto
+|-- src/
+|   |-- main.ps1
+|   |-- run.bat
+|   |-- version.json
+|   |-- lib/
+|   |   `-- AvalonEdit.dll
+|   |-- resources/
+|   |   `-- SQL.xshd
+|   `-- modules/
+|       |-- Database.psm1
+|       |-- GUI.psm1
+|       |-- Installers.psm1
+|       |-- NationalUtilities.psm1
+|       |-- QueriesPad.psm1
+|       |-- SqlOps.psm1
+|       |-- SqlTreeView.psm1
+|       |-- Utilities.psm1
+|       `-- WindowsUtilities.psm1
+|-- tests/
+|   `-- Basic.Tests.ps1
+|-- .github/
+|   `-- workflows/
+|       `-- ci.yml
+|-- build.ps1
+|-- tools.ps1
+|-- dztools.ps1
+|-- requirements.psd1
+`-- README.md
+```
 
-## 🧪 Pruebas automatizadas
+## Desarrollo
 
-Este proyecto usa Pester v5 para validación:
+Clona el repositorio:
 
-Invoke-Pester ./tests/ -Output Detailed
+```powershell
+git clone https://github.com/water0ff/dztools.git
+cd dztools
+```
 
-GitHub Actions ejecuta automáticamente:
+Ejecuta la aplicacion desde codigo fuente:
 
-Análisis con PSScriptAnalyzer
+```powershell
+powershell -ExecutionPolicy Bypass -NoProfile -File .\src\main.ps1
+```
 
-Verificación de compatibilidad PS 5.0
+Ejecuta pruebas:
 
-Pruebas unitarias
+```powershell
+Invoke-Pester .\tests\ -Output Detailed
+```
 
-Empaquetado automático en cada release
+Ejecuta el flujo de pruebas incluido en el script de build:
 
-## 🔄 Integración Continua (CI)
+```powershell
+.\build.ps1 -Test
+```
 
-El estado del pipeline (puedes activar el badge si quieres):
+Crea un paquete release:
 
-![CI](https://github.com/water0ff/dztools/actions/workflows/ci.yml/badge.svg)
+```powershell
+.\build.ps1 -Release
+```
 
-## 🌱 Roadmap (Próximas mejoras)
+O especifica version:
 
- Mejorar interfaz gráfica (WPF opcional)
+```powershell
+.\build.ps1 -Release -Version "v260214.1056"
+```
 
- Agregar gestor de logs y auditoría
+## Integracion continua
 
- Extender soporte a múltiples instalaciones de SQL Server
+GitHub Actions ejecuta el flujo definido en `.github/workflows/ci.yml`:
 
- Implementar actualizador automático
+- Analisis con `PSScriptAnalyzer`.
+- Validacion de compatibilidad con PowerShell 5.
+- Pruebas con Pester.
+- Generacion del paquete `release`.
+- Publicacion del artefacto `dztools-package`.
 
- Exportador de resultados SQL a Excel/CSV
+## Seguridad y buenas practicas
 
- Mejor integración con Active Directory
+- Ejecuta respaldos antes de usar operaciones destructivas sobre bases de datos.
+- Valida servidor, base de datos y rutas antes de restaurar, separar, adjuntar o eliminar bases.
+- Usa una cuenta con permisos minimos suficientes para la tarea.
+- Ejecuta como administrador solo cuando la funcion lo requiera.
+- Revisa los logs y mensajes de progreso antes de cerrar procesos largos.
+- No publiques archivos de configuracion con credenciales reales.
 
- ## 🤝 Contribuir
+## Roadmap
 
-¡Las contribuciones son bienvenidas!
+- Mejorar cobertura de pruebas automatizadas.
+- Documentar capturas de pantalla por modulo.
+- Agregar guia de configuracion para conexiones INI.
+- Refinar empaquetado y publicacion de releases.
+- Incorporar exportacion avanzada de resultados.
+- Fortalecer validaciones antes de operaciones destructivas.
 
-Haz un fork del repositorio
+## Contribuir
 
-Crea una rama feature:
+1. Crea un fork del repositorio.
+2. Crea una rama descriptiva:
 
+```powershell
 git checkout -b feature/nueva-funcion
+```
 
+3. Realiza tus cambios.
+4. Ejecuta pruebas y analisis antes de abrir el pull request.
+5. Envia un pull request contra `develop` o la rama indicada por el mantenedor.
 
-Haz commit y push
+## Autor
 
-Envía un Pull Request
+Desarrollado y mantenido por Gerardo Zermeno (`water0ff`).
 
-## 📄 Licencia
-
-Este proyecto está bajo la licencia MIT.
-Puedes usar, modificar y distribuir libremente bajo los términos de la licencia.
-
-## ✨ Autor
-
-Gerardo Zermeño (water0ff)
-Herramientas para soporte técnico, automatización y administración de bases de datos.
+Repositorio: <https://github.com/water0ff/dztools>

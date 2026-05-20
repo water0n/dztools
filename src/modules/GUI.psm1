@@ -1,4 +1,5 @@
 ﻿#requires -Version 5.0
+#GUI.psm1 - Módulo de funciones GUI WPF para DzTools
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
@@ -17,7 +18,7 @@ function Get-DzUiTheme {
             ButtonSystemBackground = "#FFB000"; ButtonSystemForeground = "#111111"
             ButtonNationalBackground = "#EA5C00"; ButtonNationalForeground = "#111111"
             ConsoleBackground = "#FFFFFF"; ConsoleForeground = "#111111"
-            AccentPrimary = "#1976D2"; AccentSecondary = "#2E7D32"; AccentMuted = "#6B7280"
+            AccentPrimary = "#72a6f4"; AccentSecondary = "#2E7D32"; AccentMuted = "#6B7280"
             UiFontFamily = "Segoe UI"; UiFontSize = 12
             CodeFontFamily = "Consolas"; CodeFontSize = 12
             AccentBlue = "#FFB000"
@@ -54,7 +55,7 @@ function Get-DzUiTheme {
             ButtonSystemBackground = "#FFB000"; ButtonSystemForeground = "#000000"
             ButtonNationalBackground = "#EA5C00"; ButtonNationalForeground = "#000000"
             ConsoleBackground = "#012456"; ConsoleForeground = "#FFFFFF"
-            AccentPrimary = "#2196F3"; AccentSecondary = "#4CAF50"; AccentMuted = "#9CA3AF"
+            AccentPrimary = "#72a6f4"; AccentSecondary = "#4CAF50"; AccentMuted = "#9CA3AF"
             UiFontFamily = "Segoe UI"; UiFontSize = 12
             CodeFontFamily = "Consolas"; CodeFontSize = 12
             AccentBlue = "#FFB000"
@@ -261,132 +262,438 @@ function Show-WpfMessageBox {
         [ValidateSet("Information", "Warning", "Error", "Question")][string]$Icon = "Information",
         [System.Windows.Window]$Owner
     )
+
     try {
         $safeTitle = [Security.SecurityElement]::Escape($Title)
         $safeMsg = [Security.SecurityElement]::Escape($Message)
+
+        $subtitle = switch ($Icon) {
+            "Information" { "Información" }
+            "Warning" { "Atención" }
+            "Error" { "Error" }
+            "Question" { "Confirmación" }
+            default { "Mensaje" }
+        }
+        $safeSubtitle = [Security.SecurityElement]::Escape($subtitle)
+
         $xaml = @"
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="$safeTitle" SizeToContent="WidthAndHeight" ResizeMode="NoResize" WindowStyle="None" AllowsTransparency="True" Background="Transparent" ShowInTaskbar="False" Topmost="True" FontFamily="{DynamicResource UiFontFamily}" FontSize="{DynamicResource UiFontSize}">
-  <Border Background="{DynamicResource FormBg}" BorderBrush="{DynamicResource BorderBrushColor}" BorderThickness="1" CornerRadius="14" Padding="16">
-    <Grid Width="430">
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="$safeTitle"
+        Width="560" Height="260"
+        MinWidth="560" MinHeight="260"
+        MaxWidth="560" MaxHeight="260"
+        WindowStartupLocation="Manual"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Background="Transparent"
+        AllowsTransparency="True"
+        Topmost="True"
+        FontFamily="{DynamicResource UiFontFamily}"
+        FontSize="{DynamicResource UiFontSize}">
+
+  <Window.Resources>
+    <Style TargetType="{x:Type Control}">
+      <Setter Property="FontFamily" Value="{DynamicResource UiFontFamily}"/>
+      <Setter Property="FontSize" Value="11"/>
+    </Style>
+
+    <Style TargetType="TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource FormFg}"/>
+    </Style>
+
+    <Style x:Key="IconButtonStyle" TargetType="Button">
+      <Setter Property="Width" Value="30"/>
+      <Setter Property="Height" Value="26"/>
+      <Setter Property="Padding" Value="0"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{DynamicResource FormFg}"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentRed}"/>
+                <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Bd" Property="Opacity" Value="0.9"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="Bd" Property="Opacity" Value="0.55"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="PrimaryButtonStyle" TargetType="Button">
+      <Setter Property="Height" Value="32"/>
+      <Setter Property="MinWidth" Value="110"/>
+      <Setter Property="Padding" Value="12,6"/>
+      <Setter Property="Background" Value="{DynamicResource AccentPrimary}"/>
+      <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrushColor}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="8">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Opacity" Value="0.92"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Bd" Property="Opacity" Value="0.85"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="Bd" Property="Opacity" Value="0.55"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="SecondaryButtonStyle"
+           TargetType="Button"
+           BasedOn="{StaticResource PrimaryButtonStyle}">
+      <Setter Property="Background" Value="{DynamicResource ControlBg}"/>
+      <Setter Property="Foreground" Value="{DynamicResource ControlFg}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrushColor}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="8">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource PanelBg}"/>
+                <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentPrimary}"/>
+                <Setter Property="Foreground" Value="{DynamicResource FormFg}"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Bd" Property="Opacity" Value="0.9"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="Bd" Property="Opacity" Value="0.55"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
+
+  <Border Background="{DynamicResource FormBg}"
+          BorderBrush="{DynamicResource BorderBrushColor}"
+          BorderThickness="1"
+          CornerRadius="12"
+          Margin="10"
+          SnapsToDevicePixels="True">
+
+    <Border.Effect>
+      <DropShadowEffect Color="Black"
+                        Direction="270"
+                        ShadowDepth="4"
+                        BlurRadius="14"
+                        Opacity="0.25"/>
+    </Border.Effect>
+
+    <Grid>
       <Grid.RowDefinitions>
-        <RowDefinition Height="Auto"/>
-        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="52"/>
+        <RowDefinition Height="*"/>
         <RowDefinition Height="Auto"/>
       </Grid.RowDefinitions>
-      <DockPanel Grid.Row="0" Margin="0,0,0,10">
-        <TextBlock Text="$safeTitle" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource FormFg}" DockPanel.Dock="Left"/>
-        <Button Name="btnClose" Content="✕" Width="34" Height="28" Margin="10,0,0,0" DockPanel.Dock="Right" Background="{DynamicResource ControlBg}" Foreground="{DynamicResource ControlFg}" BorderBrush="{DynamicResource BorderBrushColor}" BorderThickness="1" Cursor="Hand"/>
-      </DockPanel>
-      <Grid Grid.Row="1">
+
+      <Border Grid.Row="0"
+              Name="HeaderBar"
+              Background="{DynamicResource FormBg}"
+              CornerRadius="12,12,0,0"
+              Padding="12,8">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+          </Grid.ColumnDefinitions>
+
+          <Border Grid.Column="0"
+                  Width="6"
+                  CornerRadius="3"
+                  Background="{DynamicResource AccentPrimary}"
+                  Margin="0,4,10,4"/>
+
+          <StackPanel Grid.Column="1" Orientation="Vertical">
+            <TextBlock Text="$safeTitle"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource FormFg}"
+                       FontSize="12"/>
+            <TextBlock Name="txtSubtitle"
+                       Text="$safeSubtitle"
+                       Foreground="{DynamicResource AccentMuted}"
+                       FontSize="10"
+                       Margin="0,2,0,0"/>
+          </StackPanel>
+
+          <Button Grid.Column="2"
+                  Name="btnClose"
+                  Style="{StaticResource IconButtonStyle}"
+                  Content="✕"
+                  ToolTip="Cerrar"/>
+        </Grid>
+      </Border>
+
+      <Border Grid.Row="1"
+              Background="{DynamicResource ControlBg}"
+              BorderBrush="{DynamicResource BorderBrushColor}"
+              BorderThickness="1"
+              CornerRadius="10"
+              Padding="12"
+              Margin="12,0,12,10">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+          </Grid.ColumnDefinitions>
+
+          <Border Grid.Column="0"
+                  Width="44" Height="44"
+                  CornerRadius="12"
+                  Background="{DynamicResource PanelBg}"
+                  BorderBrush="{DynamicResource BorderBrushColor}"
+                  BorderThickness="1"
+                  VerticalAlignment="Top">
+            <TextBlock Name="txtIcon"
+                       Text="i"
+                       FontSize="20"
+                       FontWeight="Bold"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Foreground="{DynamicResource AccentPrimary}"/>
+          </Border>
+
+          <TextBlock Grid.Column="1"
+                     Name="txtMessage"
+                     Text="$safeMsg"
+                     TextWrapping="Wrap"
+                     Margin="12,2,0,0"
+                     Foreground="{DynamicResource PanelFg}"/>
+        </Grid>
+      </Border>
+
+      <Grid Grid.Row="2" Margin="12,0,12,12">
         <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="*"/>
+          <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
-        <Border Width="40" Height="40" CornerRadius="10" Background="{DynamicResource PanelBg}" BorderBrush="{DynamicResource BorderBrushColor}" BorderThickness="1" VerticalAlignment="Top">
-          <TextBlock Name="txtIcon" Text="i" FontSize="20" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource AccentPrimary}"/>
-        </Border>
-        <TextBlock Grid.Column="1" Name="txtMessage" Text="$safeMsg" TextWrapping="Wrap" Margin="12,2,0,0" Foreground="{DynamicResource PanelFg}"/>
+
+        <TextBlock Grid.Column="0"
+                   Name="txtFooterHint"
+                   Text="Enter: Aceptar   |   Esc: Cerrar"
+                   Foreground="{DynamicResource AccentMuted}"
+                   VerticalAlignment="Center"/>
+
+        <StackPanel Grid.Column="1" Orientation="Horizontal">
+          <Button Name="btn1"
+                  Content="Cancelar"
+                  Style="{StaticResource SecondaryButtonStyle}"
+                  Width="120"
+                  Margin="0,0,10,0"
+                  Visibility="Collapsed"/>
+          <Button Name="btn2"
+                  Content="No"
+                  Style="{StaticResource SecondaryButtonStyle}"
+                  Width="120"
+                  Margin="0,0,10,0"
+                  Visibility="Collapsed"/>
+          <Button Name="btn3"
+                  Content="Aceptar"
+                  Style="{StaticResource PrimaryButtonStyle}"
+                  Width="140"
+                  Visibility="Collapsed"/>
+        </StackPanel>
       </Grid>
-      <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
-        <Button Name="btn1" Width="120" Height="34" Margin="0,0,10,0"/>
-        <Button Name="btn2" Width="120" Height="34" Margin="0,0,10,0"/>
-        <Button Name="btn3" Width="140" Height="34"/>
-      </StackPanel>
+
     </Grid>
   </Border>
 </Window>
 "@
-        $result = New-WpfWindow -Xaml $xaml -PassThru
-        if (-not $result -or -not $result.Window) { throw "Show-WpfMessageBox: ventana no creada." }
-        $w = $result.Window
-        $c = $result.Controls
+
+        $ui = New-WpfWindow -Xaml $xaml -PassThru
+        if (-not $ui -or -not $ui.Window) { throw "Show-WpfMessageBox: ventana no creada." }
+
+        $w = $ui.Window
+        $c = $ui.Controls
+
         $dzState = @{ Result = [System.Windows.MessageBoxResult]::None; Completed = $false }
+
         $theme = Get-DzUiTheme
         try { Set-DzWpfThemeResources -Window $w -Theme $theme } catch {}
-        if ($Owner) { try { $w.Owner = $Owner; $w.WindowStartupLocation = "CenterOwner" } catch { $w.WindowStartupLocation = "CenterScreen" } } else { $w.WindowStartupLocation = "CenterScreen" }
+
+        try {
+            if ($Owner) { $w.Owner = $Owner }
+            else {
+                try { if (-not $w.Owner -and $global:MainWindow -is [System.Windows.Window]) { $w.Owner = $global:MainWindow } } catch {}
+            }
+        } catch {}
+
+        $w.WindowStartupLocation = "Manual"
+        $w.Add_Loaded({
+                try {
+                    $owner = $w.Owner
+                    if (-not $owner) { $w.WindowStartupLocation = "CenterScreen"; return }
+                    $ob = $owner.RestoreBounds
+                    $targetW = $w.ActualWidth; if ($targetW -le 0) { $targetW = $w.Width }
+                    $targetH = $w.ActualHeight; if ($targetH -le 0) { $targetH = $w.Height }
+                    $left = $ob.Left + (($ob.Width - $targetW) / 2)
+                    $top = $ob.Top + (($ob.Height - $targetH) / 2)
+
+                    $hOwner = [System.Windows.Interop.WindowInteropHelper]::new($owner).Handle
+                    $screen = [System.Windows.Forms.Screen]::FromHandle($hOwner)
+                    $wa = $screen.WorkingArea
+
+                    if ($left -lt $wa.Left) { $left = $wa.Left }
+                    if ($top -lt $wa.Top) { $top = $wa.Top }
+                    if (($left + $targetW) -gt $wa.Right) { $left = $wa.Right - $targetW }
+                    if (($top + $targetH) -gt $wa.Bottom) { $top = $wa.Bottom - $targetH }
+
+                    $w.Left = [double]$left
+                    $w.Top = [double]$top
+                } catch {}
+            }.GetNewClosure())
+
+        if ($c['HeaderBar']) {
+            $c['HeaderBar'].Add_MouseLeftButtonDown({
+                    if ($_.ChangedButton -eq [System.Windows.Input.MouseButton]::Left) {
+                        try { $w.DragMove() } catch {}
+                    }
+                })
+        }
+
+        $txtIcon = $c['txtIcon']
+        if ($txtIcon) {
+            switch ($Icon) {
+                "Information" { $txtIcon.Text = "i"; try { $txtIcon.Foreground = $w.FindResource("AccentPrimary") } catch {} }
+                "Warning" { $txtIcon.Text = "!"; try { $txtIcon.Foreground = $w.FindResource("AccentOrange") } catch {} }
+                "Error" { $txtIcon.Text = "×"; try { $txtIcon.Foreground = $w.FindResource("AccentRed") } catch {} }
+                "Question" { $txtIcon.Text = "?"; try { $txtIcon.Foreground = $w.FindResource("AccentSecondary") } catch {} }
+            }
+        }
+
         $btnClose = $c['btnClose']
         $btn1 = $c['btn1']
         $btn2 = $c['btn2']
         $btn3 = $c['btn3']
-        $txtIcon = $c['txtIcon']
-        if ($txtIcon) {
-            switch ($Icon) {
-                "Information" { $txtIcon.Text = "i" }
-                "Warning" { $txtIcon.Text = "!" }
-                "Error" { $txtIcon.Text = "×" }
-                "Question" { $txtIcon.Text = "?" }
-            }
-        }
+
         $allButtons = @($btn1, $btn2, $btn3, $btnClose) | Where-Object { $_ }
-        foreach ($b in @($btn1, $btn2, $btn3)) {
-            if (-not $b) { continue }
-            try {
-                $b.Background = $w.FindResource("ControlBg")
-                $b.Foreground = $w.FindResource("ControlFg")
-                $b.BorderBrush = $w.FindResource("BorderBrushColor")
-                $b.BorderThickness = [System.Windows.Thickness]::new(1)
-                $b.Cursor = "Hand"
-                $b.Visibility = "Collapsed"
-            } catch {}
-        }
+
         $w.Add_Closing({
                 if (-not $dzState.Completed) {
                     $dzState.Result = [System.Windows.MessageBoxResult]::Cancel
                     $dzState.Completed = $true
                 }
             }.GetNewClosure())
+
         $finish = {
             param([System.Windows.MessageBoxResult]$rv)
             if ($dzState.Completed) { return }
             $dzState.Result = $rv
             $dzState.Completed = $true
             foreach ($b in $allButtons) { try { $b.IsEnabled = $false } catch {} }
-            try {
-                $w.Dispatcher.Invoke([action] {
-                        try { $w.DialogResult = $true } catch {}
-                        try { $w.Close() } catch {}
-                    })
-            } catch {
-                try { $w.Close() } catch {}
-            }
+            try { $w.DialogResult = $true } catch {}
+            try { $w.Close() } catch {}
         }.GetNewClosure()
-        $finishSb = $finish
+
         $setBtn = {
-            param($btn, $text, [System.Windows.MessageBoxResult]$rv, [bool]$isPrimary)
+            param(
+                $btn,
+                [string]$text,
+                [System.Windows.MessageBoxResult]$rv,
+                [bool]$isPrimary,
+                [bool]$isCancel
+            )
             if (-not $btn) { return }
             $btn.Content = $text
             $btn.Visibility = "Visible"
             $btn.IsDefault = $false
             $btn.IsCancel = $false
             if ($isPrimary) { $btn.IsDefault = $true }
-            if ($isPrimary) {
-                try {
-                    $btn.Background = $w.FindResource("AccentPrimary")
-                    $btn.Foreground = $w.FindResource("FormFg")
-                    $btn.BorderThickness = [System.Windows.Thickness]::new(0)
-                } catch {}
-            }
+            if ($isCancel) { $btn.IsCancel = $true }
+
             $localText = $text
             $localRv = $rv
-            $localFinish = $finishSb
+            $localFinish = $finish
             $btn.Add_Click({
-                    Write-DzDebug "`t[DEBUG] Show-WpfMessageBox: BTN '$localText' handler ejecutado. result=$localRv" -Color DarkGray
                     $localFinish.Invoke($localRv)
                 }.GetNewClosure())
         }.GetNewClosure()
-        switch ($Buttons) {
-            "OK" { $setBtn.Invoke($btn3, "OK", ([System.Windows.MessageBoxResult]::OK), $true) }
-            "OKCancel" { $setBtn.Invoke($btn2, "Cancelar", ([System.Windows.MessageBoxResult]::Cancel), $false); $setBtn.Invoke($btn3, "OK", ([System.Windows.MessageBoxResult]::OK), $true) }
-            "YesNo" { $setBtn.Invoke($btn2, "No", ([System.Windows.MessageBoxResult]::No), $false); $setBtn.Invoke($btn3, "Sí", ([System.Windows.MessageBoxResult]::Yes), $true) }
-            "YesNoCancel" { $setBtn.Invoke($btn1, "Cancelar", ([System.Windows.MessageBoxResult]::Cancel), $false); $setBtn.Invoke($btn2, "No", ([System.Windows.MessageBoxResult]::No), $false); $setBtn.Invoke($btn3, "Sí", ([System.Windows.MessageBoxResult]::Yes), $true) }
-        }
+
         if ($btnClose) {
-            $localFinish2 = $finishSb
+            $localFinish2 = $finish
             $btnClose.Add_Click({
-                    Write-DzDebug "`t[DEBUG] Show-WpfMessageBox: btnClose clicked." -Color DarkGray
                     $localFinish2.Invoke([System.Windows.MessageBoxResult]::Cancel)
                 }.GetNewClosure())
         }
+
+        $hint = switch ($Buttons) {
+            "OK" { "Enter: OK   |   Esc: Cerrar" }
+            "OKCancel" { "Enter: OK   |   Esc: Cancelar" }
+            "YesNo" { "Enter: Sí   |   Esc: No" }
+            "YesNoCancel" { "Enter: Sí   |   Esc: Cancelar" }
+        }
+        if ($c['txtFooterHint']) { $c['txtFooterHint'].Text = $hint }
+
+        foreach ($b in @($btn1, $btn2, $btn3)) { if ($b) { $b.Visibility = "Collapsed" } }
+
+        switch ($Buttons) {
+            "OK" {
+                $setBtn.Invoke($btn3, "OK", ([System.Windows.MessageBoxResult]::OK), $true, $false)
+            }
+            "OKCancel" {
+                $setBtn.Invoke($btn2, "Cancelar", ([System.Windows.MessageBoxResult]::Cancel), $false, $true)
+                $setBtn.Invoke($btn3, "OK", ([System.Windows.MessageBoxResult]::OK), $true, $false)
+            }
+            "YesNo" {
+                $setBtn.Invoke($btn2, "No", ([System.Windows.MessageBoxResult]::No), $false, $true)
+                $setBtn.Invoke($btn3, "Sí", ([System.Windows.MessageBoxResult]::Yes), $true, $false)
+            }
+            "YesNoCancel" {
+                $setBtn.Invoke($btn1, "Cancelar", ([System.Windows.MessageBoxResult]::Cancel), $false, $true)
+                $setBtn.Invoke($btn2, "No", ([System.Windows.MessageBoxResult]::No), $false, $false)
+                $setBtn.Invoke($btn3, "Sí", ([System.Windows.MessageBoxResult]::Yes), $true, $false)
+            }
+        }
+
+        $w.Add_PreviewKeyDown({
+                param($sender, $e)
+                if ($e.Key -eq [System.Windows.Input.Key]::Escape) {
+                    $finish.Invoke([System.Windows.MessageBoxResult]::Cancel)
+                    $e.Handled = $true
+                }
+            }.GetNewClosure())
+
         $null = $w.ShowDialog()
         return [System.Windows.MessageBoxResult]$dzState.Result
     } catch {
@@ -399,6 +706,7 @@ function Show-WpfMessageBox {
         }
     }
 }
+
 function Show-WpfMessageBoxSafe {
     param(
         [Parameter(Mandatory)][string]$Message,
@@ -562,10 +870,28 @@ function Show-WpfFolderDialog {
     $r = $dialog.ShowDialog()
     if ($r -eq [System.Windows.Forms.DialogResult]::OK) { $dialog.SelectedPath } else { $null }
 }
-function Ui-Info { param([string]$Message, [string]$Title = "Información", [System.Windows.Window]$Owner) Show-WpfMessageBoxSafe -Message $Message -Title $Title -Buttons "OK" -Icon "Information" -Owner $Owner | Out-Null }
-function Ui-Warn { param([string]$Message, [string]$Title = "Atención", [System.Windows.Window]$Owner) Show-WpfMessageBoxSafe -Message $Message -Title $Title -Buttons "OK" -Icon "Warning" -Owner $Owner | Out-Null }
-function Ui-Error { param([string]$Message, [string]$Title = "Error", [System.Windows.Window]$Owner) Show-WpfMessageBoxSafe -Message $Message -Title $Title -Buttons "OK" -Icon "Error" -Owner $Owner | Out-Null }
-function Ui-Confirm { param([string]$Message, [string]$Title = "Confirmar", [System.Windows.Window]$Owner) (Show-WpfMessageBoxSafe -Message $Message -Title $Title -Buttons "YesNo" -Icon "Question" -Owner $Owner) -eq [System.Windows.MessageBoxResult]::Yes }
+function Ui-Info {
+    param(        [string]$Message, [string]$Title = "Información", [System.Windows.Window]$Owner    )
+    Show-WpfMessageBoxSafe -Message $Message -Title $Title -Buttons "OK" -Icon "Information" -Owner $Owner | Out-Null
+}
+function Ui-Warn {
+    param(        [string]$Message, [string]$Title = "Atención", [System.Windows.Window]$Owner    )
+    Show-WpfMessageBoxSafe -Message $Message -Title $Title -Buttons "OK" -Icon "Warning" -Owner $Owner | Out-Null
+}
+function Ui-Error {
+    param(        [string]$Message, [string]$Title = "Error", [System.Windows.Window]$Owner    )
+    Show-WpfMessageBoxSafe -Message $Message -Title $Title -Buttons "OK" -Icon "Error" -Owner $Owner | Out-Null
+}
+function Ui-Confirm {
+    param(        [string]$Message, [string]$Title = "Confirmar", [System.Windows.Window]$Owner    )
+    (Show-WpfMessageBoxSafe `
+        -Message $Message `
+        -Title $Title `
+        -Buttons "YesNo" `
+        -Icon "Question" `
+        -Owner $Owner
+    ) -eq [System.Windows.MessageBoxResult]::Yes
+}
 function Get-MainWindowXaml {
     param([hashtable]$Theme)
     @"
@@ -700,7 +1026,6 @@ function Get-MainWindowXaml {
             <Setter Property="BorderBrush" Value="{DynamicResource BorderBrushColor}"/>
         </Style>
         <Style x:Key="InfoHeaderTextBoxStyle" TargetType="{x:Type TextBox}" BasedOn="{StaticResource {x:Type TextBox}}">
-            <Setter Property="IsReadOnly" Value="True"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
             <Setter Property="TextAlignment" Value="Center"/>
@@ -1150,8 +1475,17 @@ function Get-MainWindowXaml {
                             <!-- Pestañas de Queries -->
                             <TabControl Name="tcQueries" Grid.Row="0"
                                         Background="{DynamicResource ControlBg}">
-                                <TabItem Header="+" Name="tabAddQuery"
-                                        IsEnabled="True" ToolTip="Nueva consulta"/>
+                            <TabControl.ItemContainerStyle>
+                                <Style TargetType="{x:Type TabItem}" BasedOn="{StaticResource {x:Type TabItem}}">
+                                <Setter Property="FontSize" Value="10"/>
+                                <Setter Property="Padding" Value="6,2"/>
+                                <Setter Property="Margin" Value="1,0,0,0"/>
+                                <Setter Property="MinHeight" Value="24"/>
+                                </Style>
+                            </TabControl.ItemContainerStyle>
+
+                            <TabItem Header="+" Name="tabAddQuery"
+                                    IsEnabled="True" ToolTip="Nueva consulta"/>
                             </TabControl>
                             <GridSplitter Grid.Row="1" Height="4"
                                         HorizontalAlignment="Stretch"
@@ -1161,22 +1495,30 @@ function Get-MainWindowXaml {
                                         Background="{DynamicResource ControlBg}">
                                 <TabControl.ItemContainerStyle>
                                     <Style TargetType="{x:Type TabItem}" BasedOn="{StaticResource {x:Type TabItem}}">
-                                        <Setter Property="FontSize" Value="10"/>
+                                    <Setter Property="FontSize" Value="10"/>
+                                    <Setter Property="Padding" Value="6,2"/>
+                                    <Setter Property="Margin" Value="1,0,0,0"/>
+                                    <Setter Property="MinHeight" Value="24"/>
                                     </Style>
                                 </TabControl.ItemContainerStyle>
                                 <TabItem Header="📊 Resultados">
                                     <DataGrid Name="dgResults"
                                             IsReadOnly="True"
+                                            FontSize="10"
                                             AutoGenerateColumns="True"
                                             CanUserAddRows="False"
-                                            CanUserDeleteRows="False"/>
+                                            CanUserDeleteRows="False"
+                                            RowHeight="20"
+                                            ColumnHeaderHeight="22"/>
                                 </TabItem>
+
                                 <TabItem Header="💬 Mensajes">
                                     <TextBox Name="txtMessages"
                                             IsReadOnly="True"
                                             VerticalScrollBarVisibility="Auto"
                                             FontFamily="Consolas"
-                                            FontSize="11"
+                                            FontSize="10"
+                                            Padding="4,2"
                                             Background="Transparent"
                                             BorderThickness="0"/>
                                 </TabItem>
@@ -1230,7 +1572,6 @@ function Get-MainWindowXaml {
 </Window>
 "@
 }
-
 function New-MainWindow {
     [CmdletBinding()]
     param()
@@ -1250,7 +1591,6 @@ function New-MainWindow {
         throw
     }
 }
-
 Export-ModuleMember -Function @(
     'Get-DzUiTheme', 'New-WpfWindow', 'Show-WpfMessageBox', 'Show-WpfMessageBoxSafe', 'ConvertTo-MessageBoxResult',
     'New-WpfInputDialog', 'Show-WpfProgressBar', 'Update-WpfProgressBar', 'Close-WpfProgressBar', 'Show-ProgressBar',

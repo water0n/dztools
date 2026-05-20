@@ -127,6 +127,7 @@ if ($Release) {
     }
     @'
 @echo off
+cls
 echo ===================================================
 echo   ...Local RUN \ GDZT Tools - Suite de Utilidades
 echo ===================================================

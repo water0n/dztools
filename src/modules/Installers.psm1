@@ -1,4 +1,5 @@
 ﻿#requires -Version 5.0
+#Installers.psm1 - Módulo de gestión de instaladores y paquetes Chocolatey
 function Check-Chocolatey {
     if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
         $result = Show-WpfMessageBox `
@@ -458,57 +459,69 @@ function Show-ChocolateyInstallerMenu {
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Instaladores (Chocolatey)"
-        Height="520" Width="720"
-        WindowStartupLocation="CenterOwner"
+        Width="720" Height="520"
+        MinWidth="720" MinHeight="520"
+        MaxWidth="720" MaxHeight="520"
+        WindowStartupLocation="Manual"
         WindowStyle="None"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
         Background="Transparent"
         AllowsTransparency="True"
-        Topmost="True">
+        Topmost="False"
+        FontFamily="{DynamicResource UiFontFamily}"
+        FontSize="{DynamicResource UiFontSize}">
+
     <Window.Resources>
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource PanelFg}"/>
         </Style>
+
         <Style TargetType="TextBox">
             <Setter Property="Background" Value="{DynamicResource ControlBg}"/>
             <Setter Property="Foreground" Value="{DynamicResource ControlFg}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource BorderBrushColor}"/>
             <Setter Property="BorderThickness" Value="1"/>
         </Style>
-            <Style x:Key="BaseButtonStyle" TargetType="Button">
-                <Setter Property="OverridesDefaultStyle" Value="True"/>
-                <Setter Property="SnapsToDevicePixels" Value="True"/>
-                <Setter Property="Background" Value="{DynamicResource ControlBg}"/>
-                <Setter Property="Foreground" Value="{DynamicResource ControlFg}"/>
-                <Setter Property="BorderBrush" Value="{DynamicResource BorderBrushColor}"/>
-                <Setter Property="BorderThickness" Value="1"/>
-                <Setter Property="Cursor" Value="Hand"/>
-                <Setter Property="Padding" Value="12,6"/>
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="Button">
-                            <Border Background="{TemplateBinding Background}"
-                                    BorderBrush="{TemplateBinding BorderBrush}"
-                                    BorderThickness="{TemplateBinding BorderThickness}"
-                                    CornerRadius="8"
-                                    Padding="{TemplateBinding Padding}">
-                                <ContentPresenter HorizontalAlignment="Center"
-                                                VerticalAlignment="Center"/>
-                            </Border>
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
-                <Style.Triggers>
-                    <Trigger Property="IsEnabled" Value="False">
-                        <Setter Property="Opacity" Value="1"/>
-                        <Setter Property="Cursor" Value="Arrow"/>
-                        <Setter Property="Background" Value="{DynamicResource ControlBg}"/>
-                        <Setter Property="Foreground" Value="{DynamicResource AccentMuted}"/>
-                        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrushColor}"/>
-                    </Trigger>
-                </Style.Triggers>
-            </Style>
+
+        <Style x:Key="BaseButtonStyle" TargetType="Button">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Background" Value="{DynamicResource ControlBg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource ControlFg}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrushColor}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Padding" Value="12,6"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.92"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.85"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.55"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="ActionButtonStyle" TargetType="Button" BasedOn="{StaticResource BaseButtonStyle}">
             <Setter Property="Background" Value="{DynamicResource AccentMagenta}"/>
             <Setter Property="Foreground" Value="{DynamicResource FormFg}"/>
@@ -525,6 +538,7 @@ function Show-ChocolateyInstallerMenu {
                 </Trigger>
             </Style.Triggers>
         </Style>
+
         <Style x:Key="OutlineButtonStyle" TargetType="Button" BasedOn="{StaticResource BaseButtonStyle}">
             <Setter Property="Background" Value="{DynamicResource ControlBg}"/>
             <Setter Property="Foreground" Value="{DynamicResource ControlFg}"/>
@@ -538,6 +552,39 @@ function Show-ChocolateyInstallerMenu {
                 </Trigger>
             </Style.Triggers>
         </Style>
+
+        <!-- Botón X -->
+        <Style x:Key="IconButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="30"/>
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{DynamicResource FormFg}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentRed}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.9"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.55"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style TargetType="DataGrid">
             <Setter Property="Background" Value="{DynamicResource PanelBg}"/>
             <Setter Property="Foreground" Value="{DynamicResource ControlFg}"/>
@@ -549,6 +596,7 @@ function Show-ChocolateyInstallerMenu {
             <Setter Property="HorizontalGridLinesBrush" Value="{DynamicResource BorderBrushColor}"/>
             <Setter Property="VerticalGridLinesBrush" Value="{DynamicResource BorderBrushColor}"/>
         </Style>
+
         <Style TargetType="DataGridColumnHeader">
             <Setter Property="Background" Value="{DynamicResource ControlBg}"/>
             <Setter Property="Foreground" Value="{DynamicResource ControlFg}"/>
@@ -557,6 +605,7 @@ function Show-ChocolateyInstallerMenu {
             <Setter Property="Padding" Value="8,6"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
         </Style>
+
         <Style TargetType="DataGridRow">
             <Setter Property="Foreground" Value="{DynamicResource ControlFg}"/>
             <Style.Triggers>
@@ -566,6 +615,7 @@ function Show-ChocolateyInstallerMenu {
                 </Trigger>
             </Style.Triggers>
         </Style>
+
         <Style TargetType="DataGridCell">
             <Setter Property="Foreground" Value="{DynamicResource ControlFg}"/>
             <Setter Property="Background" Value="Transparent"/>
@@ -578,177 +628,225 @@ function Show-ChocolateyInstallerMenu {
             </Style.Triggers>
         </Style>
     </Window.Resources>
-    <Grid Background="{DynamicResource FormBg}" Margin="12">
-  <Grid.RowDefinitions>
-    <RowDefinition Height="Auto"/>
-    <RowDefinition Height="Auto"/>
-    <RowDefinition Height="*"/>
-    <RowDefinition Height="Auto"/>
-  </Grid.RowDefinitions>
 
-  <!-- HEADER (Row 0) -->
-  <Border Grid.Row="0"
-          Name="brdTitleBar"
-          Background="{DynamicResource PanelBg}"
-          BorderBrush="{DynamicResource BorderBrushColor}"
-          BorderThickness="1"
-          CornerRadius="10"
-          Padding="12"
-          Margin="0,0,0,10">
-    <DockPanel>
-      <Button DockPanel.Dock="Left"
-              Name="btnExitInstaladores"
-              Content="Salir"
-              Width="120"
-              Height="34"
-              Margin="0,0,12,0"
-              Style="{StaticResource OutlineButtonStyle}"/>
-      <StackPanel DockPanel.Dock="Left">
-        <TextBlock Text="Chocolatey Installer"
-                   Foreground="{DynamicResource FormFg}"
-                   FontSize="16"
-                   FontWeight="SemiBold"/>
-        <TextBlock Text="Busca, instala y desinstala paquetes"
-                   Foreground="{DynamicResource PanelFg}"
-                   Margin="0,2,0,0"/>
-      </StackPanel>
-    </DockPanel>
-  </Border>
+    <!-- CONTENEDOR REAL -->
+    <Border Background="{DynamicResource FormBg}"
+            BorderBrush="{DynamicResource BorderBrushColor}"
+            BorderThickness="1"
+            CornerRadius="12"
+            Margin="10"
+            SnapsToDevicePixels="True">
+        <Border.Effect>
+            <DropShadowEffect Color="Black" Direction="270" ShadowDepth="4" BlurRadius="14" Opacity="0.25"/>
+        </Border.Effect>
 
-  <!-- SEARCH / ACTIONS (Row 1) -->
-  <Border Grid.Row="1"
-          Background="{DynamicResource PanelBg}"
-          BorderBrush="{DynamicResource BorderBrushColor}"
-          BorderThickness="1"
-          CornerRadius="10"
-          Padding="12"
-          Margin="0,0,0,10">
-    <Grid>
-      <Grid.RowDefinitions>
-        <RowDefinition Height="Auto"/>
-        <RowDefinition Height="Auto"/>
-        <RowDefinition Height="Auto"/>
-      </Grid.RowDefinitions>
+        <Grid Margin="12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="52"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
 
-      <Grid Grid.Row="0">
-        <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="*"/>
-          <ColumnDefinition Width="Auto"/>
-        </Grid.ColumnDefinitions>
+            <!-- HEADER draggable -->
+            <Border Grid.Row="0"
+                    Name="HeaderBar"
+                    Background="{DynamicResource FormBg}"
+                    CornerRadius="12,12,0,0"
+                    Padding="12,8">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
 
-        <TextBox Name="txtChocoSearch"
-                 Height="34"
-                 Padding="10,6"
-                 VerticalContentAlignment="Center"/>
-        <Button Grid.Column="1"
-                Name="btnBuscarChoco"
-                Content="Buscar"
-                Width="140"
-                Height="34"
-                Margin="10,0,0,0"
-                Style="{StaticResource ActionButtonStyle}"/>
-      </Grid>
+                    <Button Grid.Column="0"
+                            Name="btnExitInstaladores"
+                            Content="Salir"
+                            Width="120"
+                            Height="34"
+                            Margin="0,0,12,0"
+                            Style="{StaticResource OutlineButtonStyle}"/>
 
-      <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,0">
-        <TextBlock Text="Presets:" VerticalAlignment="Center" Margin="0,0,10,0"/>
-        <Button Name="btnPresetSSMS"
-                Content="SSMS"
-                Width="90"
-                Height="30"
-                Margin="0,0,10,0"
-                Background="{DynamicResource AccentMuted}"
-                Foreground="{DynamicResource FormFg}"
-                BorderThickness="0"
-                Cursor="Hand"/>
-        <Button Name="btnPresetHeidi"
-                Content="Heidi"
-                Width="90"
-                Height="30"
-                Background="{DynamicResource AccentMuted}"
-                Foreground="{DynamicResource FormFg}"
-                BorderThickness="0"
-                Cursor="Hand"/>
-      </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Vertical">
+                        <TextBlock Text="Chocolatey Installer"
+                                   Foreground="{DynamicResource FormFg}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"/>
+                        <TextBlock Text="Busca, instala y desinstala paquetes"
+                                   Foreground="{DynamicResource AccentMuted}"
+                                   Margin="0,2,0,0"/>
+                    </StackPanel>
 
-      <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
-        <Button Name="btnShowInstalledChoco"
-                Content="Mostrar instalados"
-                Width="170"
-                Height="34"
-                Style="{StaticResource OutlineButtonStyle}"/>
-        <Button Name="btnInstallSelectedChoco"
-                Content="Instalar seleccionado"
-                Width="190"
-                Height="34"
-                Margin="10,0,0,0"
-                IsEnabled="False"
-                Style="{StaticResource ActionButtonStyle}"/>
-        <Button Name="btnUninstallSelectedChoco"
-                Content="Desinstalar seleccionado"
-                Width="200"
-                Height="34"
-                Margin="10,0,0,0"
-                IsEnabled="False"
-                Style="{StaticResource OutlineButtonStyle}"/>
-      </StackPanel>
-    </Grid>
-  </Border>
+                    <Button Grid.Column="2"
+                            Name="btnCloseX"
+                            Style="{StaticResource IconButtonStyle}"
+                            Content="✕"
+                            ToolTip="Cerrar"/>
+                </Grid>
+            </Border>
 
-  <!-- RESULTS (Row 2) -->
-  <Border Grid.Row="2"
-          Background="{DynamicResource PanelBg}"
-          BorderBrush="{DynamicResource BorderBrushColor}"
-          BorderThickness="1"
-          CornerRadius="10"
-          Padding="10">
-    <Grid>
-      <DataGrid Name="dgvChocoResults"
-                IsReadOnly="True"
-                AutoGenerateColumns="False"
-                SelectionMode="Single"
-                CanUserAddRows="False">
-        <DataGrid.Columns>
-          <DataGridTextColumn Header="Paquete" Binding="{Binding Name}" Width="220"/>
-          <DataGridTextColumn Header="Versión" Binding="{Binding Version}" Width="140"/>
-          <DataGridTextColumn Header="Descripción" Binding="{Binding Description}" Width="*"/>
-        </DataGrid.Columns>
-      </DataGrid>
-    </Grid>
-  </Border>
+            <!-- SEARCH / ACTIONS -->
+            <Border Grid.Row="1"
+                    Background="{DynamicResource PanelBg}"
+                    BorderBrush="{DynamicResource BorderBrushColor}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="12"
+                    Margin="0,10,0,10">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
 
-  <!-- STATUS (Row 3) -->
-  <Border Grid.Row="3"
-          Background="{DynamicResource PanelBg}"
-          BorderBrush="{DynamicResource BorderBrushColor}"
-          BorderThickness="1"
-          CornerRadius="10"
-          Padding="10"
-          Margin="0,10,0,0">
-    <DockPanel>
-      <TextBlock Name="txtStatus"
-                 Text="Listo."
-                 VerticalAlignment="Center"/>
-    </DockPanel>
-  </Border>
+                    <Grid Grid.Row="0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
 
-</Grid>
+                        <TextBox Name="txtChocoSearch"
+                                 Height="34"
+                                 Padding="10,6"
+                                 VerticalContentAlignment="Center"/>
+                        <Button Grid.Column="1"
+                                Name="btnBuscarChoco"
+                                Content="Buscar"
+                                Width="140"
+                                Height="34"
+                                Margin="10,0,0,0"
+                                Style="{StaticResource ActionButtonStyle}"/>
+                    </Grid>
+
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,0">
+                        <TextBlock Text="Presets:" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                        <Button Name="btnPresetSSMS"
+                                Content="SSMS"
+                                Width="90"
+                                Height="30"
+                                Margin="0,0,10,0"
+                                Background="{DynamicResource AccentMuted}"
+                                Foreground="{DynamicResource FormFg}"
+                                BorderThickness="0"
+                                Cursor="Hand"/>
+                        <Button Name="btnPresetHeidi"
+                                Content="Heidi"
+                                Width="90"
+                                Height="30"
+                                Background="{DynamicResource AccentMuted}"
+                                Foreground="{DynamicResource FormFg}"
+                                BorderThickness="0"
+                                Cursor="Hand"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
+                        <Button Name="btnShowInstalledChoco"
+                                Content="Mostrar instalados"
+                                Width="170"
+                                Height="34"
+                                Style="{StaticResource OutlineButtonStyle}"/>
+                        <Button Name="btnInstallSelectedChoco"
+                                Content="Instalar seleccionado"
+                                Width="190"
+                                Height="34"
+                                Margin="10,0,0,0"
+                                IsEnabled="False"
+                                Style="{StaticResource ActionButtonStyle}"/>
+                        <Button Name="btnUninstallSelectedChoco"
+                                Content="Desinstalar seleccionado"
+                                Width="200"
+                                Height="34"
+                                Margin="10,0,0,0"
+                                IsEnabled="False"
+                                Style="{StaticResource OutlineButtonStyle}"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- RESULTS -->
+            <Border Grid.Row="2"
+                    Background="{DynamicResource PanelBg}"
+                    BorderBrush="{DynamicResource BorderBrushColor}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="10">
+                <DataGrid Name="dgvChocoResults"
+                          IsReadOnly="True"
+                          AutoGenerateColumns="False"
+                          SelectionMode="Single"
+                          CanUserAddRows="False">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Paquete" Binding="{Binding Name}" Width="220"/>
+                        <DataGridTextColumn Header="Versión" Binding="{Binding Version}" Width="140"/>
+                        <DataGridTextColumn Header="Descripción" Binding="{Binding Description}" Width="*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Border>
+
+            <!-- STATUS -->
+            <Border Grid.Row="3"
+                    Background="{DynamicResource PanelBg}"
+                    BorderBrush="{DynamicResource BorderBrushColor}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="10"
+                    Margin="0,10,0,0">
+                <TextBlock Name="txtStatus"
+                           Text="Listo."
+                           VerticalAlignment="Center"/>
+            </Border>
+
+        </Grid>
+    </Border>
 </Window>
 "@
     try {
         $result = New-WpfWindow -Xaml $stringXaml -PassThru
         $window = $result.Window
-        $theme = Get-DzUiTheme
+        $c = $result.Controls
         Set-DzWpfThemeResources -Window $window -Theme $theme
-        # --- DragMove: permite mover ventana sin barra de título ---
-        $brdTitleBar = $window.FindName("brdTitleBar")
-        if ($brdTitleBar) {
-            $brdTitleBar.Add_MouseLeftButtonDown({
-                    param($sender, $e)
-                    if ($e.ButtonState -eq [System.Windows.Input.MouseButtonState]::Pressed) {
+        try { Set-WpfDialogOwner -Dialog $window } catch {}
+        try { if (-not $window.Owner -and $global:MainWindow -is [System.Windows.Window]) { $window.Owner = $global:MainWindow } } catch {}
+        $window.WindowStartupLocation = "Manual"
+        $window.Add_Loaded({
+                try {
+                    $owner = $window.Owner
+                    if (-not $owner) { $window.WindowStartupLocation = "CenterScreen"; return }
+                    $ob = $owner.RestoreBounds
+                    $targetW = $window.ActualWidth; if ($targetW -le 0) { $targetW = $window.Width }
+                    $targetH = $window.ActualHeight; if ($targetH -le 0) { $targetH = $window.Height }
+                    $left = $ob.Left + (($ob.Width - $targetW) / 2)
+                    $top = $ob.Top + (($ob.Height - $targetH) / 2)
+                    $hOwner = [System.Windows.Interop.WindowInteropHelper]::new($owner).Handle
+                    $screen = [System.Windows.Forms.Screen]::FromHandle($hOwner)
+                    $wa = $screen.WorkingArea
+                    if ($left -lt $wa.Left) { $left = $wa.Left }
+                    if ($top -lt $wa.Top) { $top = $wa.Top }
+                    if (($left + $targetW) -gt $wa.Right) { $left = $wa.Right - $targetW }
+                    if (($top + $targetH) -gt $wa.Bottom) { $top = $wa.Bottom - $targetH }
+                    $window.Left = [double]$left
+                    $window.Top = [double]$top
+                } catch {}
+            }.GetNewClosure())
+        if ($c.ContainsKey('HeaderBar') -and $c['HeaderBar']) {
+            $c['HeaderBar'].Add_MouseLeftButtonDown({
+                    if ($_.ChangedButton -eq [System.Windows.Input.MouseButton]::Left) {
                         try { $window.DragMove() } catch {}
                     }
                 })
         }
+        if ($c.ContainsKey('btnCloseX') -and $c['btnCloseX']) {
+            $c['btnCloseX'].Add_Click({ try { $window.Close() } catch {} })
+        }
+        $window.Add_PreviewKeyDown({
+                param($sender, $e)
+                if ($e.Key -eq [System.Windows.Input.Key]::Escape) {
+                    try { $window.Close() } catch {}
+                }
+            })
     } catch {
         Write-Host "Error creando ventana: $_" -ForegroundColor Red
         return
@@ -1263,18 +1361,8 @@ function Invoke-LectorDP {
     }
 }
 Export-ModuleMember -Function @(
-    'Check-Chocolatey',
-    'Test-ChocolateyInstalled',
-    'Install-Software',
-    'Download-File',
-    'Expand-ArchiveFile',
-    'Show-SSMSInstallerDialog',
-    'Test-7ZipInstalled',
-    'Test-MegaToolsInstalled',
-    'Get-InstalledChocoPackages',
-    'Search-ChocoPackages',
-    'Install-ChocoPackage',
-    'Uninstall-ChocoPackage',
-    'Show-ChocolateyInstallerMenu',
-    'Invoke-PortableTool', 'Invoke-LectorDP'
+    'Check-Chocolatey', 'Test-ChocolateyInstalled', 'Install-Software', 'Download-File',
+    'Expand-ArchiveFile', 'Show-SSMSInstallerDialog', 'Test-7ZipInstalled', 'Test-MegaToolsInstalled',
+    'Get-InstalledChocoPackages', 'Search-ChocoPackages', 'Install-ChocoPackage', 'Uninstall-ChocoPackage',
+    'Show-ChocolateyInstallerMenu', 'Invoke-PortableTool', 'Invoke-LectorDP'
 )

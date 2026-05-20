@@ -1,4 +1,5 @@
 ﻿#requires -Version 5.0
+#main.ps1 - Punto de entrada principal para la aplicación DzTools
 chcp 65001 > $null
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new()
@@ -286,6 +287,9 @@ function New-MainForm {
     $global:tvDatabases = $tvDatabases
     $global:tabAddQuery = $tabAddQuery
     $global:txtMessages = $window.FindName("txtMessages")
+    if ($global:txtMessages -and $global:txtMessages.PSObject.Properties['IsReadOnly']) {
+        $global:txtMessages.IsReadOnly = $true
+    }
     $global:lblExecutionTimer = $window.FindName("lblExecutionTimer")
     $global:lblRowCount = $window.FindName("lblRowCount")
     $global:lblConnectionStatus = $lblConnectionStatus
@@ -311,7 +315,6 @@ function New-MainForm {
         }
     }
     if ($btnSsmsPanelToggle) {
-        Write-DzDebug "`t[DEBUG] Configurando toggle del panel SSMS..."
         $panelContent = $window.FindName("panelSsmsContent")
         if (-not $panelContent) {
             Write-DzDebug "`t[DEBUG] ERROR: No se encontró panelSsmsContent" -Color Red
@@ -343,7 +346,6 @@ function New-MainForm {
                     Write-Host "Error detallado: $($_ | Format-List * -Force | Out-String)" -ForegroundColor Red
                 }
             }.GetNewClosure())
-        Write-DzDebug "`t[DEBUG] Toggle configurado exitosamente"
     }
     $lblHostname.text = [System.Net.Dns]::GetHostName()
     $txt_InfoInstrucciones.Text = $global:defaultInstructions
@@ -389,6 +391,12 @@ function New-MainForm {
             })
     }
     $global:txt_AdapterStatus = $txt_AdapterStatus
+
+    @($lblHostname, $lblPort, $txt_IpAdress, $txt_AdapterStatus, $txt_InfoInstrucciones) | ForEach-Object {
+        if ($_ -and $_.PSObject.Properties['IsReadOnly']) {
+            $_.IsReadOnly = $true
+        }
+    }
     Initialize-SystemInfo -LblPort $lblPort -LblIpAddress $txt_IpAdress -LblAdapterStatus $txt_AdapterStatus -ModulesPath $modulesPath
     Load-IniConnectionsToComboBox -Combo $txtServer
     if ($txtServer.Items.Count -eq 1) {
@@ -859,7 +867,6 @@ function New-MainForm {
             }
             $e.Handled = $true
         })
-    Write-DzDebug "`t[DEBUG] Configurando evento de cierre de ventana"
     $window.Add_Closing({
             param($sender, $e)
             Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
