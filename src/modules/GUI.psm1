@@ -1522,6 +1522,92 @@ function Get-MainWindowXaml {
                                             Background="Transparent"
                                             BorderThickness="0"/>
                                 </TabItem>
+
+                                <TabItem Header="IA" Name="tabDzAi">
+                                    <Grid Margin="10">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                        </Grid.RowDefinitions>
+
+                                        <StackPanel Name="pnlDzAiKeyPrompt" Grid.Row="0" Margin="0,0,0,8">
+                                            <TextBlock Text="API key de Gemini"
+                                                    FontWeight="SemiBold"
+                                                    Foreground="{DynamicResource AccentPrimary}"
+                                                    Margin="0,0,0,4"/>
+                                            <TextBlock Text="La clave solo vive en memoria hasta cerrar la aplicacion."
+                                                    TextWrapping="Wrap"
+                                                    Foreground="{DynamicResource AccentMuted}"
+                                                    FontSize="10"
+                                                    Margin="0,0,0,8"/>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="8"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <PasswordBox Name="pwdDzAiApiKey"
+                                                        Grid.Column="0"
+                                                        PasswordChar="*"
+                                                        Height="28"
+                                                        Padding="6,2"
+                                                        FontSize="11"/>
+                                                <Button Name="btnDzAiUseApiKey"
+                                                        Grid.Column="2"
+                                                        Content="Aceptar"
+                                                        Height="28"
+                                                        MinWidth="80"
+                                                        Padding="8,2"
+                                                        Style="{StaticResource DatabaseButtonStyle}"/>
+                                            </Grid>
+                                        </StackPanel>
+
+                                        <StackPanel Name="pnlDzAiActions"
+                                                Grid.Row="1"
+                                                Orientation="Horizontal"
+                                                Visibility="Collapsed"
+                                                Margin="0,0,0,8">
+                                            <Button Name="btnDzAiExplainQuery"
+                                                    Content="Explica el Query"
+                                                    Height="28"
+                                                    Padding="10,2"
+                                                    Margin="0,0,6,0"
+                                                    Style="{StaticResource DatabaseButtonStyle}"/>
+                                            <Button Name="btnDzAiExplainMessages"
+                                                    Content="Explica los mensajes"
+                                                    Height="28"
+                                                    Padding="10,2"
+                                                    Style="{StaticResource DatabaseButtonStyle}"/>
+                                        </StackPanel>
+
+                                        <Grid Grid.Row="2">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="*"/>
+                                            </Grid.RowDefinitions>
+                                            <TextBlock Name="lblDzAiStatus"
+                                                    Grid.Row="0"
+                                                    Text="API key requerida"
+                                                    FontSize="10"
+                                                    Foreground="{DynamicResource AccentMuted}"
+                                                    Margin="0,0,0,4"/>
+                                            <TextBox Name="txtDzAiOutput"
+                                                    Grid.Row="1"
+                                                    IsReadOnly="True"
+                                                    TextWrapping="Wrap"
+                                                    AcceptsReturn="True"
+                                                    VerticalScrollBarVisibility="Auto"
+                                                    FontFamily="Consolas"
+                                                    FontSize="11"
+                                                    Padding="8"
+                                                    Background="{DynamicResource ControlBg}"
+                                                    Foreground="{DynamicResource ControlFg}"
+                                                    BorderBrush="{DynamicResource BorderBrushColor}"
+                                                    BorderThickness="1"/>
+                                        </Grid>
+                                    </Grid>
+                                </TabItem>
                             </TabControl>
                         </Grid>
                     </Grid>

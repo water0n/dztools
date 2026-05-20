@@ -385,8 +385,8 @@ function Clear-ResultTabsKeepMessages {
     param(
         [Parameter(Mandatory)][System.Windows.Controls.TabControl]$TabControl
     )
-    $messagesTabIndex = -1
-    if (-not $TabControl) { return $messagesTabIndex }
+    $insertIndex = -1
+    if (-not $TabControl) { return $insertIndex }
     $itemsToRemove = New-Object System.Collections.ArrayList
     for ($i = 0; $i -lt $TabControl.Items.Count; $i++) {
         $item = $TabControl.Items[$i]
@@ -402,8 +402,7 @@ function Clear-ResultTabsKeepMessages {
                 }
             }
         }
-        if ($header -and $header -match "Mensajes") {
-            if ($messagesTabIndex -lt 0) { $messagesTabIndex = $i }
+        if (($header -and $header -match "Mensajes") -or ($header -eq "IA")) {
             continue
         }
         [void]$itemsToRemove.Add($item)
@@ -411,7 +410,26 @@ function Clear-ResultTabsKeepMessages {
     foreach ($item in $itemsToRemove) {
         $TabControl.Items.Remove($item)
     }
-    return $messagesTabIndex
+    for ($i = 0; $i -lt $TabControl.Items.Count; $i++) {
+        $item = $TabControl.Items[$i]
+        if ($item -isnot [System.Windows.Controls.TabItem]) { continue }
+        $header = $null
+        if ($item.Header -is [string]) {
+            $header = $item.Header
+        } elseif ($item.Header -is [System.Windows.Controls.StackPanel]) {
+            foreach ($child in $item.Header.Children) {
+                if ($child -is [System.Windows.Controls.TextBlock]) {
+                    $header = $child.Text
+                    break
+                }
+            }
+        }
+        if (($header -and $header -match "Mensajes") -or ($header -eq "IA")) {
+            $insertIndex = $i
+            break
+        }
+    }
+    return $insertIndex
 }
 #EnQueriesPad.psm1
 function Execute-QueryCore {
@@ -424,6 +442,9 @@ function Execute-QueryCore {
     $Ctx.QueryRunning = $true
     try {
         if ($Ctx.tcResults) {
+            if (Get-Command Ensure-DzAiTab -ErrorAction SilentlyContinue) {
+                [void](Ensure-DzAiTab -TabControl $Ctx.tcResults)
+            }
             $hasMessagesTab = $false
             foreach ($item in $Ctx.tcResults.Items) {
                 if ($item -is [System.Windows.Controls.TabItem]) {
@@ -451,13 +472,20 @@ function Execute-QueryCore {
                     $txtMessages.SetResourceReference([System.Windows.Controls.Control]::ForegroundProperty, "ControlFg")
                 } catch {}
                 $tabMessages.Content = $txtMessages
-                if ($Ctx.tcResults.Items.Count -gt 1) {
-                    $Ctx.tcResults.Items.Insert(1, $tabMessages)
-                } else {
-                    $Ctx.tcResults.Items.Add($tabMessages)
+                $insertAt = $Ctx.tcResults.Items.Count
+                for ($i = 0; $i -lt $Ctx.tcResults.Items.Count; $i++) {
+                    $existing = $Ctx.tcResults.Items[$i]
+                    if ($existing -is [System.Windows.Controls.TabItem] -and $existing.Header -eq "IA") {
+                        $insertAt = $i
+                        break
+                    }
                 }
+                $Ctx.tcResults.Items.Insert($insertAt, $tabMessages)
                 $global:txtMessages = $txtMessages
                 $Ctx.txtMessages = $txtMessages
+                if (Get-Command Ensure-DzAiTab -ErrorAction SilentlyContinue) {
+                    [void](Ensure-DzAiTab -TabControl $Ctx.tcResults)
+                }
                 Write-Host "[INIT] ✓ Pestaña de Mensajes recreada" -ForegroundColor Green
             }
         }
