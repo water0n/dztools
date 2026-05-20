@@ -1908,9 +1908,9 @@ function Connect-DbUiSafe {
     }
 }
 Export-ModuleMember -Function @(
-    'Invoke-SqlQuery', 'Invoke-SqlQueryMultiResultSet', 'Remove-SqlComments', 'Get-SqlDatabases', 'Get-SqlDatabasesInfo', 'Backup-Database', 'Connect-DbUiSafe', 'Disconnect-DbUiSafe', 'get-DbUiContext',
+    'Invoke-SqlQuery', 'Invoke-SqlQueryMultiResultSet', 'Remove-SqlComments', 'Get-SqlDatabases', 'Get-SqlDatabasesInfo', 'Connect-DbUiSafe', 'Disconnect-DbUiSafe', 'get-DbUiContext',
     'Execute-SqlQuery', 'Get-IniConnections', 'Load-IniConnectionsToComboBox',
     'Show-MultipleResultSets', 'Export-ResultSetToCsv', 'Export-ResultSetToDelimitedText',
     'Get-PredefinedQueries', 'Remove-SqlComments', 'Get-TextPointerFromOffset', 'Get-ResultTabHeaderText',
-    'Get-ExportableResultTabs', 'Get-UseDatabaseFromQuery', 'Disconnect-DbCore', 'Connect-DbCore', 'Export-ResultsCore', 'Get-DbNameFromComboSelection'
+    'Get-ExportableResultTabs', 'Disconnect-DbCore', 'Connect-DbCore', 'Export-ResultsCore', 'Get-DbNameFromComboSelection'
 )

@@ -4547,8 +4547,6 @@ Export-ModuleMember -Function @(
   'Show-BackupDialog',
   'Reset-BackupUI',
   'Show-DetachDialog',
-  'Reset-DetachUI',
   'Show-DatabaseSizeDialog',
-  'Show-DatabaseRepairDialog',
-  'Reset-DatabaseRepairUI'
+  'Show-DatabaseRepairDialog'
 )
