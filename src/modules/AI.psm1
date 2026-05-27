@@ -657,6 +657,19 @@ function Invoke-DzAiGenerateSql {
     }
 
     try {
+        if (Get-Command New-DzAiSchemaDiscoverySql -ErrorAction SilentlyContinue) {
+            $schemaSql = New-DzAiSchemaDiscoverySql -Question $question
+            if (-not [string]::IsNullOrWhiteSpace($schemaSql)) {
+                if (-not (Test-DzAiGeneratedSqlSafe -Sql $schemaSql)) {
+                    Set-DzAiOutput "La consulta de esquema generada no paso la validacion de seguridad."
+                    Set-DzAiStatus "SQL rechazado"
+                    return
+                }
+                Insert-DzAiSqlIntoNewQueryTab -Sql $schemaSql
+                return
+            }
+        }
+
         $request = New-DzAiSqlPrompt -Question $question
         $status = "Generando SQL: $($request.IntentTitle)"
         Set-DzAiStatus $status
@@ -762,6 +775,7 @@ Export-ModuleMember -Function @(
     'Invoke-DzAiExplainQuery',
     'Invoke-DzAiExplainMessages',
     'Invoke-DzAiGenerateSql',
+    'Insert-DzAiSqlIntoNewQueryTab',
     'Confirm-DzAiApiKey',
     'Show-DzAiKeyPrompt',
     'Open-DzAiApiKeyUrl',

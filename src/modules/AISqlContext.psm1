@@ -144,6 +144,91 @@ Requisitos:
     }
 }
 
+function Get-DzAiSchemaSearchTerms {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Question)
+
+    $q = $Question.ToLowerInvariant()
+    $schemaWords = @('tabla', 'tablas', 'columna', 'columnas', 'campo', 'campos', 'schema', 'esquema')
+    $hasSchemaIntent = $false
+    foreach ($word in $schemaWords) {
+        if ($q.Contains($word)) {
+            $hasSchemaIntent = $true
+            break
+        }
+    }
+    if (-not $hasSchemaIntent) { return @() }
+
+    $terms = New-Object 'System.Collections.Generic.List[string]'
+    $patterns = @(
+        '(?i)(?:con|tengan|tiene|tienen|contengan|contiene)\s+(?:la\s+)?(?:columna|campo)?\s*([a-zA-Z_][a-zA-Z0-9_]*)',
+        '(?i)(?:columna|campo)\s+([a-zA-Z_][a-zA-Z0-9_]*)'
+    )
+    foreach ($pattern in $patterns) {
+        $match = [regex]::Match($Question, $pattern)
+        if ($match.Success) {
+            [void]$terms.Add($match.Groups[1].Value)
+        }
+    }
+
+    if ($terms.Count -eq 0) { return @() }
+
+    $expanded = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($term in $terms) {
+        $clean = ([string]$term).Trim()
+        if ([string]::IsNullOrWhiteSpace($clean)) { continue }
+        if (-not $expanded.Contains($clean)) { [void]$expanded.Add($clean) }
+        switch -Regex ($clean.ToLowerInvariant()) {
+            '^(companyid|company|empresa)$' {
+                if (-not $expanded.Contains('idempresa')) { [void]$expanded.Add('idempresa') }
+            }
+            '^(workspace|tenant|tenantid)$' {
+                if (-not $expanded.Contains('WorkspaceId')) { [void]$expanded.Add('WorkspaceId') }
+            }
+        }
+    }
+
+    return @($expanded)
+}
+
+function New-DzAiSchemaDiscoverySql {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Question)
+
+    $terms = @(Get-DzAiSchemaSearchTerms -Question $Question)
+    if ($terms.Count -eq 0) { return "" }
+
+    $termSelects = @()
+    foreach ($term in $terms) {
+        $safe = ([string]$term).Replace("'", "''")
+        $termSelects += "SELECT '$safe' AS term"
+    }
+    $termSql = $termSelects -join "`n    UNION ALL`n    "
+
+    return @"
+WITH search_terms AS (
+    $termSql
+)
+SELECT
+    c.TABLE_SCHEMA,
+    c.TABLE_NAME,
+    c.COLUMN_NAME,
+    c.DATA_TYPE,
+    c.IS_NULLABLE,
+    c.ORDINAL_POSITION
+FROM INFORMATION_SCHEMA.COLUMNS c
+WHERE EXISTS (
+    SELECT 1
+    FROM search_terms st
+    WHERE c.COLUMN_NAME COLLATE Latin1_General_CI_AI LIKE '%' + st.term + '%'
+)
+ORDER BY
+    c.TABLE_SCHEMA,
+    c.TABLE_NAME,
+    c.ORDINAL_POSITION;
+"@
+}
+
 function Get-DzAiSqlFromText {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$Text)
@@ -193,6 +278,8 @@ Export-ModuleMember -Function @(
     'Get-DzAiSqlContext',
     'Find-DzAiSqlIntent',
     'New-DzAiSqlPrompt',
+    'New-DzAiSchemaDiscoverySql',
+    'Get-DzAiSchemaSearchTerms',
     'Test-DzAiGeneratedSqlSafe',
     'Get-DzAiSqlFromText'
 )

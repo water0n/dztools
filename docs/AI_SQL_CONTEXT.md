@@ -15,6 +15,36 @@ Este documento define el contexto curado que dztools debe enviar a la IA cuando 
 - Si una pregunta pide "ultimo mes", interpretar como mes calendario anterior.
 - La IA debe devolver solo SQL, sin Markdown ni explicaciones, para que dztools pueda insertarlo en el editor.
 
+## Dominio exploracion de esquema
+
+Usar cuando el usuario pregunte por tablas, columnas, campos o estructura de la base. Estas preguntas no deben usar tablas de ventas como `cheques`; deben consultar metadatos.
+
+Fuente recomendada:
+
+- `INFORMATION_SCHEMA.COLUMNS`
+- `sys.tables`, `sys.columns`, `sys.schemas` si se necesita mas detalle tecnico.
+
+Reglas:
+
+- Para "tablas con columna X" usar `INFORMATION_SCHEMA.COLUMNS`.
+- Para "companyid" buscar tambien `idempresa`, porque en este esquema la empresa/sucursal suele representarse como `idempresa`.
+- Para "workspace" o "tenant" buscar tambien `WorkspaceId`.
+
+Consulta base para tablas que tienen una columna:
+
+```sql
+SELECT
+    c.TABLE_SCHEMA,
+    c.TABLE_NAME,
+    c.COLUMN_NAME,
+    c.DATA_TYPE,
+    c.IS_NULLABLE,
+    c.ORDINAL_POSITION
+FROM INFORMATION_SCHEMA.COLUMNS c
+WHERE c.COLUMN_NAME COLLATE Latin1_General_CI_AI LIKE '%idempresa%'
+ORDER BY c.TABLE_SCHEMA, c.TABLE_NAME, c.ORDINAL_POSITION;
+```
+
 ## Dominio ventas
 
 Fuente principal: `dbo.cheques`.
@@ -199,4 +229,3 @@ Regla:
 
 - Para ventas operativas usar `cheques`.
 - Para preguntas de facturas, CFDI, cancelaciones fiscales o timbrado usar `facturas`.
-

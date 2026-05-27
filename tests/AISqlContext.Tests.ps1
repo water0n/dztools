@@ -17,6 +17,14 @@ Describe "AISqlContext" {
         $intent.PrimaryDomain.id | Should -Be "productos_ventas"
     }
 
+    It "genera SQL deterministico para tablas con companyid" {
+        $sql = New-DzAiSchemaDiscoverySql -Question "dame las tablas con companyid"
+        $sql | Should -Match "INFORMATION_SCHEMA.COLUMNS"
+        $sql | Should -Match "companyid"
+        $sql | Should -Match "idempresa"
+        Test-DzAiGeneratedSqlSafe -Sql $sql | Should -BeTrue
+    }
+
     It "permite SELECT" {
         Test-DzAiGeneratedSqlSafe -Sql "SELECT TOP (10) * FROM dbo.cheques;" | Should -BeTrue
     }
