@@ -402,7 +402,7 @@ function Clear-ResultTabsKeepMessages {
                 }
             }
         }
-        if (($header -and $header -match "Mensajes") -or ($header -eq "IA")) {
+        if (($header -and $header -match "Mensajes") -or ($item.Name -eq "tabDzAi") -or ($header -and $header -match '(^|\s)IA($|\s)')) {
             continue
         }
         [void]$itemsToRemove.Add($item)
@@ -424,7 +424,7 @@ function Clear-ResultTabsKeepMessages {
                 }
             }
         }
-        if (($header -and $header -match "Mensajes") -or ($header -eq "IA")) {
+        if (($header -and $header -match "Mensajes") -or ($item.Name -eq "tabDzAi") -or ($header -and $header -match '(^|\s)IA($|\s)')) {
             $insertIndex = $i
             break
         }
@@ -475,7 +475,7 @@ function Execute-QueryCore {
                 $insertAt = $Ctx.tcResults.Items.Count
                 for ($i = 0; $i -lt $Ctx.tcResults.Items.Count; $i++) {
                     $existing = $Ctx.tcResults.Items[$i]
-                    if ($existing -is [System.Windows.Controls.TabItem] -and $existing.Header -eq "IA") {
+                    if ($existing -is [System.Windows.Controls.TabItem] -and (($existing.Name -eq "tabDzAi") -or ([string]$existing.Header -match '(^|\s)IA($|\s)'))) {
                         $insertAt = $i
                         break
                     }

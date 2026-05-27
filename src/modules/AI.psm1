@@ -64,6 +64,16 @@ function Get-DzAiTabHeaderText {
     return ""
 }
 
+function Test-DzAiTab {
+    param([Parameter(Mandatory = $true)]$TabItem)
+
+    if ($TabItem -isnot [System.Windows.Controls.TabItem]) { return $false }
+    try { if ($TabItem.Name -eq "tabDzAi") { return $true } } catch {}
+
+    $header = Get-DzAiTabHeaderText -TabItem $TabItem
+    return ($header -match '(^|\s)IA($|\s)')
+}
+
 function Move-DzAiTabLast {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][System.Windows.Controls.TabControl]$TabControl)
@@ -71,8 +81,7 @@ function Move-DzAiTabLast {
     $aiTab = $null
     foreach ($item in $TabControl.Items) {
         if ($item -isnot [System.Windows.Controls.TabItem]) { continue }
-        $header = Get-DzAiTabHeaderText -TabItem $item
-        if ($header -eq "IA") {
+        if (Test-DzAiTab -TabItem $item) {
             $aiTab = $item
             break
         }
@@ -93,7 +102,19 @@ function Ensure-DzAiTab {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][System.Windows.Controls.TabControl]$TabControl)
 
-    return (Move-DzAiTabLast -TabControl $TabControl)
+    $aiTab = Move-DzAiTabLast -TabControl $TabControl
+    if ($aiTab) { return $aiTab }
+
+    try {
+        if ($global:tabDzAi -is [System.Windows.Controls.TabItem]) {
+            [void]$TabControl.Items.Add($global:tabDzAi)
+            return (Move-DzAiTabLast -TabControl $TabControl)
+        }
+    } catch {
+        Write-DzAiDebug ("No se pudo reinsertar pestaña IA: {0}" -f $_.Exception.Message) ([System.ConsoleColor]::Yellow)
+    }
+
+    return $null
 }
 
 function Set-DzAiStatus {
@@ -595,6 +616,7 @@ function Initialize-DzAiTab {
         $global:btnDzAiLogout = $Window.FindName("btnDzAiLogout")
         $global:txtDzAiOutput = $Window.FindName("txtDzAiOutput")
         $global:lblDzAiStatus = $Window.FindName("lblDzAiStatus")
+        $global:tabDzAi = $Window.FindName("tabDzAi")
 
         if ($global:tcResults) { [void](Move-DzAiTabLast -TabControl $global:tcResults) }
         Write-DzAiDebug "Controles IA localizados y pestaña movida al final." ([System.ConsoleColor]::DarkGray)

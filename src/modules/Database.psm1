@@ -529,7 +529,7 @@ function Show-MultipleResultSets {
                 }
             }
         }
-        if (-not (($header -and $header -match "Mensajes") -or ($header -eq "IA"))) {
+        if (-not (($header -and $header -match "Mensajes") -or ($item.Name -eq "tabDzAi") -or ($header -and $header -match '(^|\s)IA($|\s)'))) {
             [void]$itemsToRemove.Add($item)
         }
     }
@@ -554,7 +554,7 @@ function Show-MultipleResultSets {
                 }
             }
         }
-        if (($header -and $header -match "Mensajes") -or ($header -eq "IA")) {
+        if (($header -and $header -match "Mensajes") -or ($item.Name -eq "tabDzAi") -or ($header -and $header -match '(^|\s)IA($|\s)')) {
             $permanentTabIndex = $ti
             break
         }
