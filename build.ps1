@@ -59,7 +59,7 @@ Describe "Pruebas iniciales" {
     }
 
     It "Deben existir los módulos" {
-        $modules = @("GUI.psm1", "Database.psm1", "Utilities.psm1", "SqlTreeView.psm1", "Installers.psm1", "WindowsUtilities.psm1", "NationalUtilities.psm1", "SqlOps.psm1", "QueriesPad.psm1")
+$modules = @("GUI.psm1", "Database.psm1", "Utilities.psm1", "SqlTreeView.psm1", "Installers.psm1", "WindowsUtilities.psm1", "NationalUtilities.psm1", "SqlOps.psm1", "QueriesPad.psm1", "AISqlContext.psm1", "AI.psm1")
         foreach ($module in $modules) {
             Test-Path ".\src\modules\$module" | Should -Be $true
         }
@@ -121,7 +121,8 @@ if ($Release) {
     Write-Host "Copiando archivos..." -ForegroundColor Yellow
     $mustHave = @(
         (Join-Path $SrcPath "lib\AvalonEdit.dll"),
-        (Join-Path $SrcPath "resources\SQL.xshd")
+        (Join-Path $SrcPath "resources\SQL.xshd"),
+        (Join-Path $SrcPath "resources\ai-sql-context.json")
     )
 
     foreach ($f in $mustHave) {

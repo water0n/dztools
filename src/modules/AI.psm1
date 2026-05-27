@@ -145,6 +145,7 @@ function Set-DzAiBusy {
     try {
         if ($global:btnDzAiExplainQuery) { $global:btnDzAiExplainQuery.IsEnabled = -not $IsBusy }
         if ($global:btnDzAiExplainMessages) { $global:btnDzAiExplainMessages.IsEnabled = -not $IsBusy }
+        if ($global:btnDzAiGenerateSql) { $global:btnDzAiGenerateSql.IsEnabled = -not $IsBusy }
         if ($global:btnDzAiUseApiKey) { $global:btnDzAiUseApiKey.IsEnabled = -not $IsBusy }
         if ($global:btnDzAiLogout) { $global:btnDzAiLogout.IsEnabled = -not $IsBusy }
     } catch {}
@@ -295,7 +296,8 @@ function Start-DzAiRequest {
     param(
         [Parameter(Mandatory = $true)][string]$Prompt,
         [Parameter(Mandatory = $true)][string]$SystemInstruction,
-        [string]$WorkingText = "Consultando Gemini..."
+        [string]$WorkingText = "Consultando Gemini...",
+        [scriptblock]$OnSuccess
     )
 
     Write-DzAiDebug ("Start-DzAiRequest. PromptChars={0} SystemChars={1}" -f $Prompt.Length, $SystemInstruction.Length) ([System.ConsoleColor]::Cyan)
@@ -511,8 +513,12 @@ function Start-DzAiRequest {
             $script:DzAiCurrentResult = $result
             if ($result -and $result.Ok) {
                 Write-DzAiDebug ("Respuesta OK. Caracteres={0}" -f ([string]$result.Text).Length) ([System.ConsoleColor]::Green)
-                Set-DzAiOutput ([string]$result.Text)
-                Set-DzAiStatus "Gemini listo"
+                if ($OnSuccess) {
+                    & $OnSuccess ([string]$result.Text)
+                } else {
+                    Set-DzAiOutput ([string]$result.Text)
+                    Set-DzAiStatus "Gemini listo"
+                }
             } else {
                 $err = if ($result -and $result.Error) { [string]$result.Error } else { "Error desconocido llamando a Gemini." }
                 Write-DzAiDebug "Respuesta con error: $err" ([System.ConsoleColor]::Red)
@@ -600,6 +606,86 @@ $messages
     Start-DzAiRequest -Prompt $prompt -SystemInstruction $system -WorkingText "Explicando mensajes con Gemini..."
 }
 
+function Insert-DzAiSqlIntoNewQueryTab {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Sql)
+
+    if (-not $global:tcQueries) {
+        Set-DzAiOutput "Se genero SQL, pero no se encontro el editor de queries para insertarlo.`n`n$Sql"
+        Set-DzAiStatus "SQL generado"
+        return
+    }
+    if (-not (Get-Command New-QueryTab -ErrorAction SilentlyContinue) -or -not (Get-Command Set-SqlEditorText -ErrorAction SilentlyContinue)) {
+        Set-DzAiOutput "Se genero SQL, pero no estan disponibles las funciones del editor.`n`n$Sql"
+        Set-DzAiStatus "SQL generado"
+        return
+    }
+
+    $tab = New-QueryTab -TabControl $global:tcQueries
+    if (-not $tab -or -not $tab.Tag -or -not $tab.Tag.Editor) {
+        Set-DzAiOutput "Se genero SQL, pero no se pudo crear una pestana nueva.`n`n$Sql"
+        Set-DzAiStatus "SQL generado"
+        return
+    }
+
+    Set-SqlEditorText -Editor $tab.Tag.Editor -Text $Sql
+    $tab.Tag.IsDirty = $true
+    if (Get-Command Update-QueryTabHeader -ErrorAction SilentlyContinue) {
+        Update-QueryTabHeader -TabItem $tab
+    }
+    try { $tab.Tag.Editor.Focus() | Out-Null } catch {}
+    Set-DzAiOutput "SQL generado e insertado en una nueva pestana de query. Revisalo antes de ejecutar.`n`n$Sql"
+    Set-DzAiStatus "SQL generado"
+}
+
+function Invoke-DzAiGenerateSql {
+    Write-DzAiDebug "Boton 'Generar SQL' presionado." ([System.ConsoleColor]::Cyan)
+
+    $question = ""
+    try {
+        if ($global:txtDzAiQuestion) { $question = [string]$global:txtDzAiQuestion.Text }
+    } catch {}
+    if ([string]::IsNullOrWhiteSpace($question)) {
+        Set-DzAiOutput "Escribe una pregunta para generar SQL. Ejemplo: clientes con mas ventas del ultimo mes."
+        Set-DzAiStatus "Pregunta requerida"
+        return
+    }
+    if (-not (Get-Command New-DzAiSqlPrompt -ErrorAction SilentlyContinue)) {
+        Set-DzAiOutput "No esta cargado el modulo AISqlContext.psm1."
+        Set-DzAiStatus "Error"
+        return
+    }
+
+    try {
+        $request = New-DzAiSqlPrompt -Question $question
+        $status = "Generando SQL: $($request.IntentTitle)"
+        Set-DzAiStatus $status
+        Start-DzAiRequest `
+            -Prompt $request.Prompt `
+            -SystemInstruction $request.SystemInstruction `
+            -WorkingText "$status..." `
+            -OnSuccess {
+                param([string]$text)
+                try {
+                    $sql = Get-DzAiSqlFromText -Text $text
+                    if (-not (Test-DzAiGeneratedSqlSafe -Sql $sql)) {
+                        Set-DzAiOutput "Gemini devolvio una respuesta que no paso la validacion de seguridad. No se inserto en el editor.`n`nRespuesta:`n$text"
+                        Set-DzAiStatus "SQL rechazado"
+                        return
+                    }
+                    Insert-DzAiSqlIntoNewQueryTab -Sql $sql
+                } catch {
+                    Set-DzAiOutput ("No se pudo procesar el SQL generado:`n{0}`n`nRespuesta:`n{1}" -f $_.Exception.Message, $text)
+                    Set-DzAiStatus "Error"
+                }
+            }.GetNewClosure()
+    } catch {
+        Write-DzAiDebug ("Error generando prompt SQL: {0}" -f $_.Exception.Message) ([System.ConsoleColor]::Red)
+        Set-DzAiOutput ("No se pudo preparar el contexto SQL:`n{0}" -f $_.Exception.Message)
+        Set-DzAiStatus "Error"
+    }
+}
+
 function Initialize-DzAiTab {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][System.Windows.Window]$Window)
@@ -613,6 +699,8 @@ function Initialize-DzAiTab {
         $global:btnDzAiOpenApiKeyUrl = $Window.FindName("btnDzAiOpenApiKeyUrl")
         $global:btnDzAiExplainQuery = $Window.FindName("btnDzAiExplainQuery")
         $global:btnDzAiExplainMessages = $Window.FindName("btnDzAiExplainMessages")
+        $global:btnDzAiGenerateSql = $Window.FindName("btnDzAiGenerateSql")
+        $global:txtDzAiQuestion = $Window.FindName("txtDzAiQuestion")
         $global:btnDzAiLogout = $Window.FindName("btnDzAiLogout")
         $global:txtDzAiOutput = $Window.FindName("txtDzAiOutput")
         $global:lblDzAiStatus = $Window.FindName("lblDzAiStatus")
@@ -642,6 +730,19 @@ function Initialize-DzAiTab {
         if ($global:btnDzAiExplainMessages) {
             $global:btnDzAiExplainMessages.Add_Click({ Invoke-DzAiExplainMessages }.GetNewClosure())
         }
+        if ($global:btnDzAiGenerateSql) {
+            $global:btnDzAiGenerateSql.Add_Click({ Invoke-DzAiGenerateSql }.GetNewClosure())
+        }
+        if ($global:txtDzAiQuestion) {
+            $global:txtDzAiQuestion.Add_KeyDown({
+                param($sender, $e)
+                if (($e.Key -eq [System.Windows.Input.Key]::Enter) -and
+                    ([System.Windows.Input.Keyboard]::Modifiers -band [System.Windows.Input.ModifierKeys]::Control)) {
+                    Invoke-DzAiGenerateSql
+                    $e.Handled = $true
+                }
+            }.GetNewClosure())
+        }
         if ($global:btnDzAiLogout) {
             $global:btnDzAiLogout.Add_Click({ Disconnect-DzAiSession }.GetNewClosure())
         }
@@ -660,6 +761,7 @@ Export-ModuleMember -Function @(
     'Invoke-DzGeminiGenerateContent',
     'Invoke-DzAiExplainQuery',
     'Invoke-DzAiExplainMessages',
+    'Invoke-DzAiGenerateSql',
     'Confirm-DzAiApiKey',
     'Show-DzAiKeyPrompt',
     'Open-DzAiApiKeyUrl',

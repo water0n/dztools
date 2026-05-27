@@ -1,0 +1,178 @@
+{
+  "version": 1,
+  "engine": "SQL Server",
+  "globalRules": [
+    "Generar solo SELECT.",
+    "No usar INSERT, UPDATE, DELETE, MERGE, DROP, ALTER, TRUNCATE, EXEC, CREATE, BACKUP ni RESTORE.",
+    "Usar rangos de fecha semiabiertos: >= inicio AND < fin.",
+    "Para ventas cerradas usar dbo.cheques.cierre.",
+    "Excluir ventas canceladas con dbo.cheques.cancelado = 0.",
+    "Devolver solo SQL, sin Markdown ni explicaciones."
+  ],
+  "domains": [
+    {
+      "id": "ventas",
+      "title": "Ventas cerradas",
+      "keywords": ["venta", "ventas", "vendido", "vendidas", "actuales", "hoy", "dia", "mes", "subtotal", "total", "ticket", "cuentas", "trafico"],
+      "tables": ["dbo.cheques"],
+      "views": ["dbo.vwrepventascheques"],
+      "columns": [
+        "cheques.folio",
+        "cheques.fecha",
+        "cheques.cierre",
+        "cheques.idcliente",
+        "cheques.idempresa",
+        "cheques.pagado",
+        "cheques.cancelado",
+        "cheques.subtotal",
+        "cheques.totalimpuesto1",
+        "cheques.descuentoimporte",
+        "cheques.total",
+        "cheques.totalalimentos",
+        "cheques.totalbebidas",
+        "cheques.totalotros",
+        "cheques.nopersonas"
+      ],
+      "joins": [],
+      "notes": [
+        "Usar cheques.cierre como fecha de venta cerrada.",
+        "Filtrar cheques.cancelado = 0 para ventas reales."
+      ],
+      "examples": [
+        {
+          "name": "Ventas de hoy",
+          "sql": "SELECT CAST(ch.cierre AS date) AS fecha, ch.idempresa, COUNT(*) AS cuentas, SUM(ch.subtotal) AS subtotal, SUM(ch.totalimpuesto1) AS impuestos, SUM(ch.descuentoimporte) AS descuentos, SUM(ch.total) AS total FROM dbo.cheques ch WHERE ch.cancelado = 0 AND ch.cierre >= CAST(GETDATE() AS date) AND ch.cierre < DATEADD(day, 1, CAST(GETDATE() AS date)) GROUP BY CAST(ch.cierre AS date), ch.idempresa ORDER BY fecha DESC, ch.idempresa;"
+        }
+      ]
+    },
+    {
+      "id": "clientes_ventas",
+      "title": "Clientes con ventas",
+      "keywords": ["cliente", "clientes", "rfc", "razon", "nombre", "mejores clientes", "mas ventas", "top clientes"],
+      "tables": ["dbo.cheques", "dbo.clientes"],
+      "views": ["dbo.vw_sr_clientes"],
+      "columns": [
+        "clientes.idcliente",
+        "clientes.nombre",
+        "clientes.rfc",
+        "clientes.fechaalta",
+        "cheques.idcliente",
+        "cheques.cierre",
+        "cheques.total",
+        "cheques.cancelado"
+      ],
+      "joins": ["dbo.cheques.idcliente = dbo.clientes.idcliente"],
+      "notes": [
+        "Para ranking de clientes usar SUM(cheques.total) y COUNT(*).",
+        "Usar LEFT JOIN si se quiere conservar ventas sin cliente."
+      ],
+      "examples": [
+        {
+          "name": "Clientes con mas ventas del ultimo mes",
+          "sql": "SELECT TOP (20) c.idcliente, c.nombre, COUNT(*) AS cuentas, SUM(ch.total) AS total_ventas FROM dbo.cheques ch LEFT JOIN dbo.clientes c ON c.idcliente = ch.idcliente WHERE ch.cancelado = 0 AND ch.cierre >= DATEADD(month, DATEDIFF(month, 0, GETDATE()) - 1, 0) AND ch.cierre < DATEADD(month, DATEDIFF(month, 0, GETDATE()), 0) GROUP BY c.idcliente, c.nombre ORDER BY total_ventas DESC;"
+        }
+      ]
+    },
+    {
+      "id": "productos_ventas",
+      "title": "Productos vendidos",
+      "keywords": ["producto", "productos", "platillo", "articulo", "mas vendidos", "cantidad", "grupo", "subgrupo"],
+      "tables": ["dbo.cheques", "dbo.cheqdet", "dbo.productos"],
+      "views": ["dbo.vwrepproductosvendidoscheques"],
+      "columns": [
+        "cheques.folio",
+        "cheques.cierre",
+        "cheques.cancelado",
+        "cheqdet.foliodet",
+        "cheqdet.cantidad",
+        "cheqdet.idproducto",
+        "cheqdet.precio",
+        "cheqdet.descuento",
+        "productos.idproducto",
+        "productos.descripcion",
+        "productos.idgrupo"
+      ],
+      "joins": [
+        "dbo.cheques.folio = dbo.cheqdet.foliodet",
+        "dbo.cheqdet.idproducto = dbo.productos.idproducto"
+      ],
+      "notes": [
+        "Para ranking ordenar por SUM(cheqdet.cantidad) o importe estimado.",
+        "La vista dbo.vwrepproductosvendidoscheques ya excluye canceladas."
+      ],
+      "examples": [
+        {
+          "name": "Productos mas vendidos del ultimo mes",
+          "sql": "SELECT TOP (20) p.idproducto, p.descripcion, SUM(cd.cantidad) AS cantidad, SUM(cd.cantidad * cd.precio) AS importe_estimado FROM dbo.cheques ch INNER JOIN dbo.cheqdet cd ON ch.folio = cd.foliodet INNER JOIN dbo.productos p ON cd.idproducto = p.idproducto WHERE ch.cancelado = 0 AND ch.cierre >= DATEADD(month, DATEDIFF(month, 0, GETDATE()) - 1, 0) AND ch.cierre < DATEADD(month, DATEDIFF(month, 0, GETDATE()), 0) GROUP BY p.idproducto, p.descripcion ORDER BY cantidad DESC;"
+        }
+      ]
+    },
+    {
+      "id": "pagos",
+      "title": "Pagos y formas de pago",
+      "keywords": ["pago", "pagos", "forma de pago", "formas de pago", "efectivo", "tarjeta", "propina", "cobro"],
+      "tables": ["dbo.cheques", "dbo.chequespagos", "dbo.formasdepago"],
+      "views": [],
+      "columns": [
+        "cheques.folio",
+        "cheques.cierre",
+        "cheques.cancelado",
+        "chequespagos.folio",
+        "chequespagos.idformadepago",
+        "chequespagos.importe",
+        "chequespagos.propina",
+        "formasdepago.idformadepago"
+      ],
+      "joins": [
+        "dbo.chequespagos.folio = dbo.cheques.folio",
+        "dbo.chequespagos.idformadepago = dbo.formasdepago.idformadepago"
+      ],
+      "notes": [
+        "Si no se necesita descripcion, agrupar por chequespagos.idformadepago.",
+        "Sumar chequespagos.importe para importe cobrado y propina para propinas."
+      ],
+      "examples": [
+        {
+          "name": "Ventas por forma de pago de hoy",
+          "sql": "SELECT cp.idformadepago, COUNT(DISTINCT ch.folio) AS cuentas, SUM(cp.importe) AS importe, SUM(cp.propina) AS propina FROM dbo.cheques ch INNER JOIN dbo.chequespagos cp ON cp.folio = ch.folio WHERE ch.cancelado = 0 AND ch.cierre >= CAST(GETDATE() AS date) AND ch.cierre < DATEADD(day, 1, CAST(GETDATE() AS date)) GROUP BY cp.idformadepago ORDER BY importe DESC;"
+        }
+      ]
+    },
+    {
+      "id": "facturas",
+      "title": "Facturacion fiscal",
+      "keywords": ["factura", "facturas", "facturacion", "cfdi", "timbrado", "cancelada", "cancelacion", "fiscal"],
+      "tables": ["dbo.facturas", "dbo.facturasmovtos", "dbo.foliosfacturados"],
+      "views": ["dbo.vwFECol_DatosFactura"],
+      "columns": [
+        "facturas.idfactura",
+        "facturas.serie",
+        "facturas.folio",
+        "facturas.fecha",
+        "facturas.idcliente",
+        "facturas.cancelada",
+        "facturas.subtotal",
+        "facturas.impuesto",
+        "facturas.total",
+        "facturasmovtos.idfactura",
+        "foliosfacturados.idfactura",
+        "foliosfacturados.folio"
+      ],
+      "joins": [
+        "dbo.facturas.idfactura = dbo.facturasmovtos.idfactura",
+        "dbo.facturas.idfactura = dbo.foliosfacturados.idfactura"
+      ],
+      "notes": [
+        "Usar facturas solo para preguntas fiscales, CFDI, timbrado o cancelaciones.",
+        "Para ventas operativas preferir dbo.cheques."
+      ],
+      "examples": [
+        {
+          "name": "Facturas del ultimo mes",
+          "sql": "SELECT f.idfactura, f.serie, f.folio, f.fecha, f.idcliente, f.subtotal, f.impuesto, f.total, f.cancelada FROM dbo.facturas f WHERE f.fecha >= DATEADD(month, DATEDIFF(month, 0, GETDATE()) - 1, 0) AND f.fecha < DATEADD(month, DATEDIFF(month, 0, GETDATE()), 0) ORDER BY f.fecha DESC;"
+        }
+      ]
+    }
+  ]
+}
+
