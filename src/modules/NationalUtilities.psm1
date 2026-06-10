@@ -421,6 +421,46 @@ function Show-DllRegistrationDialog {
     }
     Write-DzDebug "`t[DEBUG][Show-DllRegistrationDialog] FIN"
 }
+$script:SetNSEveryoneFullControlWorker = {
+    param([string]$FolderPath)
+
+    try {
+        if (-not [System.IO.Directory]::Exists($FolderPath)) {
+            throw "La carpeta '$FolderPath' no existe."
+        }
+
+        $directoryInfo = New-Object System.IO.DirectoryInfo($FolderPath)
+        $directoryAcl = $directoryInfo.GetAccessControl()
+        $everyoneSid = New-Object System.Security.Principal.SecurityIdentifier(
+            [System.Security.Principal.WellKnownSidType]::WorldSid,
+            $null
+        )
+        $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+            $everyoneSid,
+            [System.Security.AccessControl.FileSystemRights]::FullControl,
+            [System.Security.AccessControl.InheritanceFlags]"ContainerInherit, ObjectInherit",
+            [System.Security.AccessControl.PropagationFlags]::None,
+            [System.Security.AccessControl.AccessControlType]::Allow
+        )
+
+        $directoryAcl.AddAccessRule($accessRule)
+        $directoryAcl.SetAccessRuleProtection($false, $true)
+        $directoryInfo.SetAccessControl($directoryAcl)
+
+        [PSCustomObject]@{
+            Ok         = $true
+            FolderPath = $FolderPath
+            Error      = $null
+        }
+    } catch {
+        [PSCustomObject]@{
+            Ok         = $false
+            FolderPath = $FolderPath
+            Error      = $_.Exception.Message
+        }
+    }
+}
+
 function Check-Permissions {
     [CmdletBinding()]
     param(
@@ -502,7 +542,6 @@ function Check-Permissions {
         }
     }
     $permissions = @()
-    $everyoneSid = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::WorldSid, $null)
     $everyonePermissions = @()
     $everyoneHasFullControl = $false
     $rules = $acl.GetAccessRules($true, $true, [System.Security.Principal.NTAccount])
@@ -525,29 +564,114 @@ function Check-Permissions {
         $ask = "El usuario 'Everyone' no tiene permisos de 'Full Control'. ¿Deseas concederlo?"
         $doIt = & $uiConfirm $ask "Permisos 'Everyone'"
         if ($doIt) {
+            $progressWindow = $null
+            $permissionsJob = $null
+            $permissionsTimer = $null
             try {
                 if (-not (Test-Administrator)) {
                     & $uiWarn "Esta acción requiere permisos de administrador." "Permisos requeridos"
                     return
                 }
-                $directoryInfo = New-Object System.IO.DirectoryInfo($folderPath)
-                $dirAcl = $directoryInfo.GetAccessControl()
-                $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-                    $everyoneSid,
-                    [System.Security.AccessControl.FileSystemRights]::FullControl,
-                    [System.Security.AccessControl.InheritanceFlags]"ContainerInherit, ObjectInherit",
-                    [System.Security.AccessControl.PropagationFlags]::None,
-                    [System.Security.AccessControl.AccessControlType]::Allow
-                )
-                $dirAcl.AddAccessRule($accessRule)
-                $dirAcl.SetAccessRuleProtection($false, $true)
-                $directoryInfo.SetAccessControl($dirAcl)
-                Write-Host "Se ha concedido 'Full Control' a 'Everyone'." -ForegroundColor Green
-                & $uiInfo "Se ha concedido 'Full Control' a 'Everyone' en '$folderPath'." "Permisos actualizados"
+
+                $progressWindow = Show-WpfProgressBar `
+                    -Title "Otorgando permisos" `
+                    -Message "Otorgando permisos, por favor espere..." `
+                    -Owner $Owner `
+                    -IsIndeterminate $true `
+                    -HidePercent `
+                    -BlockOwner `
+                    -ProgrammaticCloseOnly
+                if (-not $progressWindow) {
+                    throw "No se pudo abrir el indicador de progreso."
+                }
+
+                $permissionsJob = Start-Job `
+                    -ScriptBlock $script:SetNSEveryoneFullControlWorker `
+                    -ArgumentList $folderPath `
+                    -ErrorAction Stop
+                if (-not $permissionsJob) {
+                    throw "No se pudo iniciar el trabajo de permisos."
+                }
+
+                $permissionsTimer = [System.Windows.Threading.DispatcherTimer]::new()
+                $permissionsTimer.Interval = [TimeSpan]::FromMilliseconds(300)
+                $permissionsTimer.Add_Tick({
+                        $jobState = $permissionsJob.State
+                        if ($jobState -notin @('Completed', 'Failed', 'Stopped')) {
+                            return
+                        }
+
+                        $permissionsTimer.Stop()
+                        $jobResult = $null
+                        $jobError = $null
+                        try {
+                            $jobOutput = @(Receive-Job -Job $permissionsJob -ErrorAction SilentlyContinue)
+                            $jobResult = $jobOutput |
+                                Where-Object { $_ -and $_.PSObject.Properties['Ok'] } |
+                                Select-Object -Last 1
+                            if (-not $jobResult -or -not $jobResult.Ok) {
+                                if ($jobResult -and $jobResult.Error) {
+                                    $jobError = [string]$jobResult.Error
+                                } elseif ($permissionsJob.ChildJobs.Count -gt 0 -and $permissionsJob.ChildJobs[0].JobStateInfo.Reason) {
+                                    $jobError = $permissionsJob.ChildJobs[0].JobStateInfo.Reason.Message
+                                } else {
+                                    $jobError = "El trabajo terminó sin devolver un resultado válido."
+                                }
+                            }
+                        } catch {
+                            $jobError = $_.Exception.Message
+                        } finally {
+                            try {
+                                Remove-Job -Job $permissionsJob -Force -ErrorAction SilentlyContinue
+                            } catch {
+                                Write-Verbose "No se pudo liberar el trabajo de permisos: $($_.Exception.Message)"
+                            }
+                            if ($progressWindow) {
+                                Close-WpfProgressBar -Window $progressWindow
+                            }
+                        }
+
+                        if ($jobResult -and $jobResult.Ok) {
+                            Write-Host "Se ha concedido 'Full Control' a 'Everyone'." -ForegroundColor Green
+                            & $uiInfo "Se ha concedido 'Full Control' a 'Everyone' en '$folderPath'." "Permisos actualizados"
+                        } else {
+                            $errMsg = "Error aplicando permisos a '$folderPath':`r`n$jobError"
+                            Write-Host "Error aplicando permisos: $jobError" -ForegroundColor Red
+                            & $uiError $errMsg "Error al aplicar permisos"
+                        }
+                        Write-DzDebug "`t[DEBUG][Check-Permissions] FIN"
+                    }.GetNewClosure())
+                $permissionsTimer.Start()
+                Write-DzDebug "`t[DEBUG][Check-Permissions] Trabajo de permisos iniciado."
+                return
             } catch {
-                $errMsg = "Error aplicando permisos a '$folderPath':`r`n$($_.Exception.Message)"
-                Write-Host "Error aplicando permisos: $($_.Exception.Message)" -ForegroundColor Red
+                if ($permissionsTimer) {
+                    try {
+                        $permissionsTimer.Stop()
+                    } catch {
+                        Write-Verbose "No se pudo detener el temporizador de permisos: $($_.Exception.Message)"
+                    }
+                }
+                if ($permissionsJob) {
+                    try {
+                        Stop-Job -Job $permissionsJob -ErrorAction SilentlyContinue
+                    } catch {
+                        Write-Verbose "No se pudo detener el trabajo de permisos: $($_.Exception.Message)"
+                    }
+                    try {
+                        Remove-Job -Job $permissionsJob -Force -ErrorAction SilentlyContinue
+                    } catch {
+                        Write-Verbose "No se pudo liberar el trabajo de permisos: $($_.Exception.Message)"
+                    }
+                }
+                if ($progressWindow) {
+                    Close-WpfProgressBar -Window $progressWindow
+                }
+                $errMsg = "Error iniciando la aplicación de permisos en '$folderPath':`r`n$($_.Exception.Message)"
+                Write-Host "Error iniciando la aplicación de permisos: $($_.Exception.Message)" -ForegroundColor Red
                 & $uiError $errMsg "Error al aplicar permisos"
+                Write-DzDebug "`t[DEBUG][Check-Permissions] FIN con error de inicio."
+                return
             }
         }
     } else {

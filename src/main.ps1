@@ -680,7 +680,7 @@ function New-MainForm {
                 Ui-Error "Esta acción requiere permisos de administrador.`r`nPor favor, ejecuta Gerardo Zermeño Tools como administrador." $global:MainWindow
                 return
             }
-            Check-Permissions
+            Check-Permissions -Owner $global:MainWindow
         })
     $btnAplicacionesNS.Add_Click({
             Write-DzDebug ("`t[DEBUG] Click en 'Aplicaciones NS' - {0}" -f (Get-Date -Format "HH:mm:ss")) -Color DarkYellow

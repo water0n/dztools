@@ -718,7 +718,15 @@ function Show-WpfMessageBoxSafe {
     ConvertTo-MessageBoxResult (Show-WpfMessageBox -Message $Message -Title $Title -Buttons $Buttons -Icon $Icon -Owner $Owner)
 }
 function Show-WpfProgressBar {
-    param([string]$Title = "Procesando", [string]$Message = "Por favor espere...")
+    param(
+        [string]$Title = "Procesando",
+        [string]$Message = "Por favor espere...",
+        [System.Windows.Window]$Owner,
+        [bool]$IsIndeterminate = $true,
+        [switch]$HidePercent,
+        [switch]$BlockOwner,
+        [switch]$ProgrammaticCloseOnly
+    )
     $theme = Get-DzUiTheme
     $stringXaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="$Title" Height="220" Width="500" WindowStartupLocation="CenterScreen" ResizeMode="NoResize" WindowStyle="None" AllowsTransparency="True" Background="Transparent" Topmost="True" ShowInTaskbar="False" FontFamily="{DynamicResource UiFontFamily}" FontSize="{DynamicResource UiFontSize}">
@@ -733,6 +741,7 @@ function Show-WpfProgressBar {
   </Border>
 </Window>
 "@
+    $ownerWasEnabled = $null
     try {
         $result = New-WpfWindow -Xaml $stringXaml -PassThru
         $window = $result.Window
@@ -741,11 +750,56 @@ function Show-WpfProgressBar {
         $window | Add-Member -MemberType NoteProperty -Name MessageLabel -Value $result.Controls['lblMessage'] | Out-Null
         $window | Add-Member -MemberType NoteProperty -Name PercentLabel -Value $result.Controls['lblPercent'] | Out-Null
         $window | Add-Member -MemberType NoteProperty -Name IsClosed -Value $false | Out-Null
-        $window.Add_Closed({ $window.IsClosed = $true })
+        $window | Add-Member -MemberType NoteProperty -Name ProgrammaticCloseOnly -Value ([bool]$ProgrammaticCloseOnly) | Out-Null
+        $window | Add-Member -MemberType NoteProperty -Name AllowProgrammaticClose -Value $false | Out-Null
+        $window | Add-Member -MemberType NoteProperty -Name BlockedOwner -Value $null | Out-Null
+        $window | Add-Member -MemberType NoteProperty -Name OwnerWasEnabled -Value $null | Out-Null
+
+        $window.ProgressBar.IsIndeterminate = $IsIndeterminate
+        if ($HidePercent) {
+            $window.PercentLabel.Visibility = [System.Windows.Visibility]::Collapsed
+        }
+        if ($Owner) {
+            $window.Owner = $Owner
+            $window.WindowStartupLocation = [System.Windows.WindowStartupLocation]::CenterOwner
+        }
+        if ($BlockOwner -and $Owner) {
+            $ownerWasEnabled = $Owner.IsEnabled
+            $window.BlockedOwner = $Owner
+            $window.OwnerWasEnabled = $ownerWasEnabled
+            $Owner.IsEnabled = $false
+        }
+        $window.Add_Closing({
+                param($closingWindow, $closingEventArgs)
+                if ($closingWindow.ProgrammaticCloseOnly -and -not $closingWindow.AllowProgrammaticClose) {
+                    $closingEventArgs.Cancel = $true
+                }
+            })
+        $window.Add_Closed({
+                param($closedWindow)
+                $closedWindow.IsClosed = $true
+                if ($closedWindow.BlockedOwner) {
+                    try {
+                        $closedWindow.BlockedOwner.IsEnabled = [bool]$closedWindow.OwnerWasEnabled
+                        if ($closedWindow.OwnerWasEnabled) {
+                            $closedWindow.BlockedOwner.Activate() | Out-Null
+                        }
+                    } catch {
+                        Write-Verbose "No se pudo reactivar la ventana propietaria: $($_.Exception.Message)"
+                    }
+                }
+            })
         $window.Show()
         $window.Dispatcher.Invoke([System.Windows.Threading.DispatcherPriority]::Background, [action] {}) | Out-Null
         $window
     } catch {
+        if ($Owner -and $null -ne $ownerWasEnabled) {
+            try {
+                $Owner.IsEnabled = [bool]$ownerWasEnabled
+            } catch {
+                Write-Verbose "No se pudo restaurar la ventana propietaria: $($_.Exception.Message)"
+            }
+        }
         Write-Error "Error al crear barra de progreso: $_"
         $null
     }
@@ -800,7 +854,18 @@ function Close-WpfProgressBar {
     if (-not ($Window -is [System.Windows.Window])) { Write-Warning "Close-WpfProgressBar: El objeto recibido NO es WPF Window. Tipo: $($Window.GetType().FullName)"; return }
     if ($Window.PSObject.Properties.Match('IsClosed').Count -gt 0 -and $Window.IsClosed) { return }
     if ($null -eq $Window.Dispatcher -or $Window.Dispatcher.HasShutdownStarted -or $Window.Dispatcher.HasShutdownFinished) { return }
-    try { $Window.Dispatcher.Invoke([action] { if (-not $Window.IsClosed) { $Window.Close() } }, [System.Windows.Threading.DispatcherPriority]::Normal) } catch { Write-Warning "Error cerrando barra de progreso: $($_.Exception.Message)" }
+    try {
+        $Window.Dispatcher.Invoke([action] {
+                if (-not $Window.IsClosed) {
+                    if ($Window.PSObject.Properties.Match('AllowProgrammaticClose').Count -gt 0) {
+                        $Window.AllowProgrammaticClose = $true
+                    }
+                    $Window.Close()
+                }
+            }, [System.Windows.Threading.DispatcherPriority]::Normal)
+    } catch {
+        Write-Warning "Error cerrando barra de progreso: $($_.Exception.Message)"
+    }
 }
 function Show-ProgressBar { Show-WpfProgressBar -Title "Progreso de Actualización" -Message "Iniciando proceso..." }
 function Set-WpfControlEnabled {
