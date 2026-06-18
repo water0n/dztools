@@ -47,6 +47,8 @@ foreach ($module in $modules) {
 }
 $global:defaultInstructions = @"
 ----- CAMBIOS -----
+- Subida a CloudFare Buckets
+- AI SQL Context para generar consultas con IA (beta)
 - Nuevo botón para Innstaladores NS
 - Monitor de servicios y logs
 - Historial de queries
