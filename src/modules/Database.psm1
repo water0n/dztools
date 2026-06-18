@@ -529,12 +529,35 @@ function Show-MultipleResultSets {
                 }
             }
         }
-        if (-not ($header -and $header -match "Mensajes")) {
+        if (-not (($header -and $header -match "Mensajes") -or ($item.Name -eq "tabDzAi") -or ($header -and $header -match '(^|\s)IA($|\s)'))) {
             [void]$itemsToRemove.Add($item)
         }
     }
     foreach ($item in $itemsToRemove) {
         $TabControl.Items.Remove($item)
+    }
+    if (Get-Command Ensure-DzAiTab -ErrorAction SilentlyContinue) {
+        [void](Ensure-DzAiTab -TabControl $TabControl)
+    }
+    $permanentTabIndex = -1
+    for ($ti = 0; $ti -lt $TabControl.Items.Count; $ti++) {
+        $item = $TabControl.Items[$ti]
+        if ($item -isnot [System.Windows.Controls.TabItem]) { continue }
+        $header = $null
+        if ($item.Header -is [string]) {
+            $header = $item.Header
+        } elseif ($item.Header -is [System.Windows.Controls.StackPanel]) {
+            foreach ($child in $item.Header.Children) {
+                if ($child -is [System.Windows.Controls.TextBlock]) {
+                    $header = $child.Text
+                    break
+                }
+            }
+        }
+        if (($header -and $header -match "Mensajes") -or ($item.Name -eq "tabDzAi") -or ($header -and $header -match '(^|\s)IA($|\s)')) {
+            $permanentTabIndex = $ti
+            break
+        }
     }
     Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestañas removidas: $($itemsToRemove.Count)"
     Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestañas restantes: $($TabControl.Items.Count)"
@@ -559,12 +582,12 @@ function Show-MultipleResultSets {
         $text.Text = "La consulta no devolvió resultados."
         $text.Margin = "10"
         $tab.Content = $text
-        if ($messagesTab) {
-            $TabControl.Items.Insert(0, $tab)
-            Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña vacía insertada en índice 0 (antes de Mensajes)"
+        if ($permanentTabIndex -ge 0) {
+            $TabControl.Items.Insert($permanentTabIndex, $tab)
+            Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña vacía insertada antes de pestañas fijas"
         } else {
             [void]$TabControl.Items.Add($tab)
-            Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña vacía agregada (no hay Mensajes)"
+            Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña vacía agregada (no hay pestañas fijas)"
         }
         if ($global:lblRowCount) { $global:lblRowCount.Text = "📊 0" }
         Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] FIN (sin resultados)"
@@ -706,7 +729,8 @@ function Show-MultipleResultSets {
                 $grid = $dg
                 $sb = New-Object System.Text.StringBuilder
                 $visibleCols = @($grid.Columns | Where-Object { $_.Visibility -eq 'Visible' } | Sort-Object DisplayIndex)
-                if ($grid.SelectedItems -and $grid.SelectedItems.Count -gt 0) {
+                if (($grid.SelectedItems -and $grid.SelectedItems.Count -gt 0) -and
+                    (-not $grid.SelectedCells -or $grid.SelectedCells.Count -eq 0)) {
                     $columns = $visibleCols
                     if ($IncludeHeaders) {
                         $headers = foreach ($col in $columns) {
@@ -749,56 +773,7 @@ function Show-MultipleResultSets {
                     #Write-DzDebug "`t[DEBUG][DataGrid] Texto copiado:`n$textToCopy"
                     return
                 }
-                if ((-not $grid.SelectedItems -or $grid.SelectedItems.Count -eq 0) -and
-                    ($grid.SelectedCells -and $grid.SelectedCells.Count -gt 0)) {
-                    $rowsFromCells = @(
-                        $grid.SelectedCells |
-                        Select-Object -ExpandProperty Item -Unique
-                    )
-                    if ($grid.SelectedCells.Count -eq 1) {
-                        $row = $rowsFromCells[0]
-                        $columns = $visibleCols
-                        if ($IncludeHeaders) {
-                            $headers = foreach ($col in $columns) {
-                                $h = if ($col.Header -is [string]) { $col.Header } elseif ($col.Header) { $col.Header.ToString() } else { "" }
-                                ($h -replace '__', '_' -replace "`t", " ")
-                            }
-                            [void]$sb.AppendLine(($headers -join "`t"))
-                        }
-                        $values = foreach ($col in $columns) {
-                            $propName = $null
-                            if ($col -is [System.Windows.Controls.DataGridBoundColumn]) {
-                                $binding = $col.Binding
-                                if ($binding -and $binding.Path) { $propName = $binding.Path.Path }
-                            }
-                            if (-not $propName -and $col.SortMemberPath) { $propName = $col.SortMemberPath }
-                            if (-not $propName -and $col.Header) {
-                                $h2 = $col.Header
-                                $propName = if ($h2 -is [string]) { (($h2 -replace '__', '_')) } else { ($h2.ToString() -replace '__', '_') }
-                            }
-                            $cellValue = ""
-                            try {
-                                $val = $null
-                                if ($row -is [System.Data.DataRowView]) { $val = $row[$propName] }
-                                elseif ($row.PSObject.Properties[$propName]) { $val = $row.PSObject.Properties[$propName].Value }
-                                else { $val = $row.$propName }
-                                if ($null -eq $val -or $val -is [System.DBNull]) { $cellValue = "NULL" }
-                                elseif ($val -is [datetime]) { $cellValue = ([datetime]$val).ToString("yyyy-MM-dd HH:mm:ss.fff") }
-                                elseif ($val -is [bool]) { $cellValue = if ($val) { "True" } else { "False" } }
-                                else { $cellValue = $val.ToString() }
-                            } catch { $cellValue = "" }
-                            $cellValue -replace "`t", " " -replace "`r`n", " " -replace "`n", " " -replace "`r", " "
-                        }
-                        [void]$sb.AppendLine(($values -join "`t"))
-                        $textToCopy = $sb.ToString().TrimEnd("`r", "`n")
-                        [System.Windows.Clipboard]::SetText($textToCopy)
-                        $headerMsg = if ($IncludeHeaders) { "con encabezados" } else { "sin encabezados" }
-                        Write-DzDebug "`t[DEBUG][DataGrid] ✓ Copiado (por celda en 1 fila): 1 filas × $($columns.Count) columnas ($headerMsg)"
-                        #Write-DzDebug "`t[DEBUG][DataGrid] Texto copiado:`n$textToCopy"
-                        return
-                    }
-                }
-                # 2) Si NO hay filas seleccionadas, copiar por CELDAS (usar copiado nativo del DataGrid)
+                # 2) Si hay celdas seleccionadas, copiar exactamente esas celdas con el modo nativo del DataGrid.
                 if (-not $grid.SelectedCells -or $grid.SelectedCells.Count -eq 0) { return }
                 $oldMode = $grid.ClipboardCopyMode
                 try {
@@ -1049,12 +1024,12 @@ function Show-MultipleResultSets {
                 } catch { }
             })
         $tab.Content = $dg
-        if ($messagesTab) {
+        if ($permanentTabIndex -ge 0) {
             $TabControl.Items.Insert($i - 1, $tab)
-            Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña $i insertada en índice $($i-1) (antes de Mensajes)"
+            Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña $i insertada en índice $($i-1) (antes de pestañas fijas)"
         } else {
             [void]$TabControl.Items.Add($tab)
-            Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña $i agregada (no hay Mensajes)"
+            Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña $i agregada (no hay pestañas fijas)"
         }
         Write-Host "`tPestaña $i creada con $rowCount filas" -ForegroundColor Green
     }
@@ -1933,9 +1908,9 @@ function Connect-DbUiSafe {
     }
 }
 Export-ModuleMember -Function @(
-    'Invoke-SqlQuery', 'Invoke-SqlQueryMultiResultSet', 'Remove-SqlComments', 'Get-SqlDatabases', 'Get-SqlDatabasesInfo', 'Backup-Database', 'Connect-DbUiSafe', 'Disconnect-DbUiSafe', 'get-DbUiContext',
+    'Invoke-SqlQuery', 'Invoke-SqlQueryMultiResultSet', 'Remove-SqlComments', 'Get-SqlDatabases', 'Get-SqlDatabasesInfo', 'Connect-DbUiSafe', 'Disconnect-DbUiSafe', 'get-DbUiContext',
     'Execute-SqlQuery', 'Get-IniConnections', 'Load-IniConnectionsToComboBox',
     'Show-MultipleResultSets', 'Export-ResultSetToCsv', 'Export-ResultSetToDelimitedText',
     'Get-PredefinedQueries', 'Remove-SqlComments', 'Get-TextPointerFromOffset', 'Get-ResultTabHeaderText',
-    'Get-ExportableResultTabs', 'Get-UseDatabaseFromQuery', 'Disconnect-DbCore', 'Connect-DbCore', 'Export-ResultsCore', 'Get-DbNameFromComboSelection'
+    'Get-ExportableResultTabs', 'Disconnect-DbCore', 'Connect-DbCore', 'Export-ResultsCore', 'Get-DbNameFromComboSelection'
 )

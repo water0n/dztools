@@ -718,7 +718,15 @@ function Show-WpfMessageBoxSafe {
     ConvertTo-MessageBoxResult (Show-WpfMessageBox -Message $Message -Title $Title -Buttons $Buttons -Icon $Icon -Owner $Owner)
 }
 function Show-WpfProgressBar {
-    param([string]$Title = "Procesando", [string]$Message = "Por favor espere...")
+    param(
+        [string]$Title = "Procesando",
+        [string]$Message = "Por favor espere...",
+        [System.Windows.Window]$Owner,
+        [bool]$IsIndeterminate = $true,
+        [switch]$HidePercent,
+        [switch]$BlockOwner,
+        [switch]$ProgrammaticCloseOnly
+    )
     $theme = Get-DzUiTheme
     $stringXaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="$Title" Height="220" Width="500" WindowStartupLocation="CenterScreen" ResizeMode="NoResize" WindowStyle="None" AllowsTransparency="True" Background="Transparent" Topmost="True" ShowInTaskbar="False" FontFamily="{DynamicResource UiFontFamily}" FontSize="{DynamicResource UiFontSize}">
@@ -733,6 +741,7 @@ function Show-WpfProgressBar {
   </Border>
 </Window>
 "@
+    $ownerWasEnabled = $null
     try {
         $result = New-WpfWindow -Xaml $stringXaml -PassThru
         $window = $result.Window
@@ -741,11 +750,56 @@ function Show-WpfProgressBar {
         $window | Add-Member -MemberType NoteProperty -Name MessageLabel -Value $result.Controls['lblMessage'] | Out-Null
         $window | Add-Member -MemberType NoteProperty -Name PercentLabel -Value $result.Controls['lblPercent'] | Out-Null
         $window | Add-Member -MemberType NoteProperty -Name IsClosed -Value $false | Out-Null
-        $window.Add_Closed({ $window.IsClosed = $true })
+        $window | Add-Member -MemberType NoteProperty -Name ProgrammaticCloseOnly -Value ([bool]$ProgrammaticCloseOnly) | Out-Null
+        $window | Add-Member -MemberType NoteProperty -Name AllowProgrammaticClose -Value $false | Out-Null
+        $window | Add-Member -MemberType NoteProperty -Name BlockedOwner -Value $null | Out-Null
+        $window | Add-Member -MemberType NoteProperty -Name OwnerWasEnabled -Value $null | Out-Null
+
+        $window.ProgressBar.IsIndeterminate = $IsIndeterminate
+        if ($HidePercent) {
+            $window.PercentLabel.Visibility = [System.Windows.Visibility]::Collapsed
+        }
+        if ($Owner) {
+            $window.Owner = $Owner
+            $window.WindowStartupLocation = [System.Windows.WindowStartupLocation]::CenterOwner
+        }
+        if ($BlockOwner -and $Owner) {
+            $ownerWasEnabled = $Owner.IsEnabled
+            $window.BlockedOwner = $Owner
+            $window.OwnerWasEnabled = $ownerWasEnabled
+            $Owner.IsEnabled = $false
+        }
+        $window.Add_Closing({
+                param($closingWindow, $closingEventArgs)
+                if ($closingWindow.ProgrammaticCloseOnly -and -not $closingWindow.AllowProgrammaticClose) {
+                    $closingEventArgs.Cancel = $true
+                }
+            })
+        $window.Add_Closed({
+                param($closedWindow)
+                $closedWindow.IsClosed = $true
+                if ($closedWindow.BlockedOwner) {
+                    try {
+                        $closedWindow.BlockedOwner.IsEnabled = [bool]$closedWindow.OwnerWasEnabled
+                        if ($closedWindow.OwnerWasEnabled) {
+                            $closedWindow.BlockedOwner.Activate() | Out-Null
+                        }
+                    } catch {
+                        Write-Verbose "No se pudo reactivar la ventana propietaria: $($_.Exception.Message)"
+                    }
+                }
+            })
         $window.Show()
         $window.Dispatcher.Invoke([System.Windows.Threading.DispatcherPriority]::Background, [action] {}) | Out-Null
         $window
     } catch {
+        if ($Owner -and $null -ne $ownerWasEnabled) {
+            try {
+                $Owner.IsEnabled = [bool]$ownerWasEnabled
+            } catch {
+                Write-Verbose "No se pudo restaurar la ventana propietaria: $($_.Exception.Message)"
+            }
+        }
         Write-Error "Error al crear barra de progreso: $_"
         $null
     }
@@ -800,7 +854,18 @@ function Close-WpfProgressBar {
     if (-not ($Window -is [System.Windows.Window])) { Write-Warning "Close-WpfProgressBar: El objeto recibido NO es WPF Window. Tipo: $($Window.GetType().FullName)"; return }
     if ($Window.PSObject.Properties.Match('IsClosed').Count -gt 0 -and $Window.IsClosed) { return }
     if ($null -eq $Window.Dispatcher -or $Window.Dispatcher.HasShutdownStarted -or $Window.Dispatcher.HasShutdownFinished) { return }
-    try { $Window.Dispatcher.Invoke([action] { if (-not $Window.IsClosed) { $Window.Close() } }, [System.Windows.Threading.DispatcherPriority]::Normal) } catch { Write-Warning "Error cerrando barra de progreso: $($_.Exception.Message)" }
+    try {
+        $Window.Dispatcher.Invoke([action] {
+                if (-not $Window.IsClosed) {
+                    if ($Window.PSObject.Properties.Match('AllowProgrammaticClose').Count -gt 0) {
+                        $Window.AllowProgrammaticClose = $true
+                    }
+                    $Window.Close()
+                }
+            }, [System.Windows.Threading.DispatcherPriority]::Normal)
+    } catch {
+        Write-Warning "Error cerrando barra de progreso: $($_.Exception.Message)"
+    }
 }
 function Show-ProgressBar { Show-WpfProgressBar -Title "Progreso de Actualización" -Message "Iniciando proceso..." }
 function Set-WpfControlEnabled {
@@ -1521,6 +1586,133 @@ function Get-MainWindowXaml {
                                             Padding="4,2"
                                             Background="Transparent"
                                             BorderThickness="0"/>
+                                </TabItem>
+
+                                <TabItem Header="🤖 IA" Name="tabDzAi">
+                                    <Grid Margin="10">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                        </Grid.RowDefinitions>
+
+                                        <StackPanel Name="pnlDzAiKeyPrompt" Grid.Row="0" Margin="0,0,0,8">
+                                            <TextBlock Text="API key de Gemini"
+                                                    FontWeight="SemiBold"
+                                                    Foreground="{DynamicResource AccentPrimary}"
+                                                    Margin="0,0,0,4"/>
+                                            <TextBlock Text="La clave solo vive en memoria hasta cerrar la aplicacion."
+                                                    TextWrapping="Wrap"
+                                                    Foreground="{DynamicResource AccentMuted}"
+                                                    FontSize="10"
+                                                    Margin="0,0,0,8"/>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                                <TextBlock Text="Puedes crear tu API key en "
+                                                        Foreground="{DynamicResource AccentMuted}"
+                                                        FontSize="10"/>
+                                                <Button Name="btnDzAiOpenApiKeyUrl"
+                                                        Content="Google AI Studio"
+                                                        Padding="0"
+                                                        BorderThickness="0"
+                                                        Background="Transparent"
+                                                        Foreground="{DynamicResource AccentPrimary}"
+                                                        Cursor="Hand"
+                                                        FontSize="10"
+                                                        ToolTip="Abrir https://aistudio.google.com/app/apikey"/>
+                                            </StackPanel>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="8"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <PasswordBox Name="pwdDzAiApiKey"
+                                                        Grid.Column="0"
+                                                        PasswordChar="*"
+                                                        Height="28"
+                                                        Padding="6,2"
+                                                        FontSize="11"/>
+                                                <Button Name="btnDzAiUseApiKey"
+                                                        Grid.Column="2"
+                                                        Content="Aceptar"
+                                                        Height="28"
+                                                        MinWidth="80"
+                                                        Padding="8,2"
+                                                        Style="{StaticResource DatabaseButtonStyle}"/>
+                                            </Grid>
+                                        </StackPanel>
+
+                                        <StackPanel Name="pnlDzAiActions"
+                                                Grid.Row="1"
+                                                Visibility="Collapsed"
+                                                Margin="0,0,0,8">
+                                            <TextBox Name="txtDzAiQuestion"
+                                                    MinHeight="48"
+                                                    MaxHeight="88"
+                                                    AcceptsReturn="True"
+                                                    TextWrapping="Wrap"
+                                                    VerticalScrollBarVisibility="Auto"
+                                                    FontSize="11"
+                                                    Padding="6"
+                                                    Margin="0,0,0,6"
+                                                    ToolTip="Pregunta en lenguaje natural. Ctrl+Enter genera SQL."
+                                                    Background="{DynamicResource ControlBg}"
+                                                    Foreground="{DynamicResource ControlFg}"
+                                                    BorderBrush="{DynamicResource BorderBrushColor}"
+                                                    BorderThickness="1"/>
+                                            <StackPanel Orientation="Horizontal">
+                                                <Button Name="btnDzAiGenerateSql"
+                                                        Content="Generar SQL"
+                                                        Height="28"
+                                                        Padding="10,2"
+                                                        Margin="0,0,6,0"
+                                                        Style="{StaticResource DatabaseButtonStyle}"/>
+                                                <Button Name="btnDzAiExplainQuery"
+                                                        Content="Explica el Query"
+                                                        Height="28"
+                                                        Padding="10,2"
+                                                        Margin="0,0,6,0"
+                                                        Style="{StaticResource DatabaseButtonStyle}"/>
+                                                <Button Name="btnDzAiExplainMessages"
+                                                        Content="Explica los mensajes"
+                                                        Height="28"
+                                                        Padding="10,2"
+                                                        Margin="0,0,6,0"
+                                                        Style="{StaticResource DatabaseButtonStyle}"/>
+                                                <Button Name="btnDzAiLogout"
+                                                        Content="Cerrar sesion"
+                                                        Height="28"
+                                                        Padding="10,2"
+                                                        Style="{StaticResource DatabaseButtonStyle}"/>
+                                            </StackPanel>
+                                        </StackPanel>
+
+                                        <Grid Grid.Row="2">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="*"/>
+                                            </Grid.RowDefinitions>
+                                            <TextBlock Name="lblDzAiStatus"
+                                                    Grid.Row="0"
+                                                    Text="API key requerida"
+                                                    FontSize="10"
+                                                    Foreground="{DynamicResource AccentMuted}"
+                                                    Margin="0,0,0,4"/>
+                                            <TextBox Name="txtDzAiOutput"
+                                                    Grid.Row="1"
+                                                    IsReadOnly="True"
+                                                    TextWrapping="Wrap"
+                                                    AcceptsReturn="True"
+                                                    VerticalScrollBarVisibility="Auto"
+                                                    FontFamily="Consolas"
+                                                    FontSize="11"
+                                                    Padding="8"
+                                                    Background="{DynamicResource ControlBg}"
+                                                    Foreground="{DynamicResource ControlFg}"
+                                                    BorderBrush="{DynamicResource BorderBrushColor}"
+                                                    BorderThickness="1"/>
+                                        </Grid>
+                                    </Grid>
                                 </TabItem>
                             </TabControl>
                         </Grid>

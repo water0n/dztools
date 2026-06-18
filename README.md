@@ -65,7 +65,7 @@ Suite de utilidades para soporte tecnico, administracion de Windows y operacione
 
 - Instalacion y validacion de Chocolatey.
 - Busqueda, instalacion y desinstalacion de paquetes Chocolatey.
-- Validacion de dependencias como 7-Zip y MegaTools.
+- Validacion de dependencias como 7-Zip.
 - Instalador de SSMS.
 - Ejecucion de herramientas portables.
 - Busqueda de instaladores LZMA.

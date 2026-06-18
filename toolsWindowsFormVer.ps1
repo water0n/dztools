@@ -3165,9 +3165,6 @@ function Test-SameHost {
 function Test-7ZipInstalled {
     return (Test-Path "C:\Program Files\7-Zip\7z.exe")
 }
-function Test-MegaToolsInstalled {
-    return ([bool](Get-Command megatools -ErrorAction SilentlyContinue))
-}
 $btnBackup.Add_Click({
     $chocoInstalled = Test-ChocolateyInstalled
     if (-not $chocoInstalled) {
@@ -3175,7 +3172,6 @@ $btnBackup.Add_Click({
         $messageInstalacionChoco = @"
 Chocolatey es necesario SOLAMENTE si deseas:
 ✓ Comprimir el respaldo (crear ZIP con contraseña)
-✓ Subir el respaldo a Mega.nz
 
 Si solo necesitas crear el respaldo básico (archivo .BAK), NO es necesario instalarlo.
 
@@ -3299,7 +3295,7 @@ Si solo necesitas crear el respaldo básico (archivo .BAK), NO es necesario inst
         }
     })
         $chkSubir = New-Object System.Windows.Forms.CheckBox
-        $chkSubir.Text     = "Subir a Mega.nz"
+        $chkSubir.Text     = "Subir a nube (solo versión WPF actual)"
         $chkSubir.AutoSize = $true
         $chkSubir.Location = New-Object System.Drawing.Point(20, 195)
         $chkSubir.Checked  = $false
@@ -3314,7 +3310,7 @@ Si solo necesitas crear el respaldo básico (archivo .BAK), NO es necesario inst
                 if ($sameHost) {
                     #$chkSubir.Enabled = $true
                     $chkSubir.Enabled = $false
-                    $tooltipCHK.SetToolTip($chkSubir, "Activar para subir respaldo comprimido a Mega.nz.")
+                    $tooltipCHK.SetToolTip($chkSubir, "Usa la versión WPF actual para subir a Cloudflare R2.")
                 }
                 else {
                     $chkSubir.Enabled = $false
@@ -3488,108 +3484,12 @@ Si solo necesitas crear el respaldo básico (archivo .BAK), NO es necesario inst
                         }
                         Write-Host "Respaldo comprimido en: $zipPath" -ForegroundColor Green
                         if ($chkSubir.Checked) {
-                            if (-not (Test-MegaToolsInstalled)) {
-                                Write-Host "MegaTools no encontrado. Intentando instalar con Chocolatey..."
-                                try {
-                                    if (Get-Command choco -ErrorAction SilentlyContinue) {
-                                        choco install megatools -y | Out-Null
-                                        Start-Sleep -Seconds 2
-                                        if (-not (Test-MegaToolsInstalled)) {
-                                            throw "La instalación de megatools falló"
-                                        }
-                                    } else {
-                                        throw "Chocolatey no está instalado"
-                                    }
-                                } catch {
-                                    [System.Windows.Forms.MessageBox]::Show(
-                                        "Error instalando megatools: $($_.Exception.Message)",
-                                        "Error",
-                                        [System.Windows.Forms.MessageBoxButtons]::OK,
-                                        [System.Windows.Forms.MessageBoxIcon]::Error
-                                    )
-                                    $chkSubir.Checked = $false
-                                    return
-                                }
-                            }
-                        }
-                        if ($chkSubir.Checked) {
-                            if (-not (Test-MegaToolsInstalled)) {
-                                [System.Windows.Forms.MessageBox]::Show(
-                                    "megatools no está instalado. No puede subir a Mega.nz.",
-                                    "Error",
-                                    [System.Windows.Forms.MessageBoxButtons]::OK,
-                                    [System.Windows.Forms.MessageBoxIcon]::Error
-                                )
-                            } else {
-                                $script:lblTrabajando.Text = "Iniciando subida a Mega.nz..."
-                                $pbBackup.Value = 0
-                                Start-Sleep -Milliseconds 300
-                                for ($i = 0; $i -le 30; $i += 10) {
-                                    $pbBackup.Value = $i
-                                    Start-Sleep -Milliseconds 200
-                                }
-                                $MegaUser = "gerardo.zermeno@nationalsoft.mx"
-                                $MegaPass = "National.09$#"
-                                $configPath = "$env:APPDATA\megatools.ini"
-                                if (-not (Test-Path $configPath)) {
-                                    $configDir = Split-Path -Path $configPath -Parent
-                                    if (-not (Test-Path $configDir)) {
-                                        New-Item -ItemType Directory -Path $configDir -Force | Out-Null
-                                    }
-                                    $megaConfig = @"
-[Login]
-Username = $MegaUser
-Password = $MegaPass
-"@
-                                    $megaConfig | Out-File -FilePath $configPath -Encoding utf8 -Force
-                                }
-                                for ($i = 30; $i -le 60; $i += 10) {
-                                    $pbBackup.Value = $i
-                                    Start-Sleep -Milliseconds 200
-                                }
-                                $script:lblTrabajando.Text = "Subiendo archivo comprimido..."
-                                $zipToUpload = "$global:backupPath.zip"
-                                $uploadCmd   = "megatools put --username `"$MegaUser`" --password `"$MegaPass`" `"$zipToUpload`""
-                                $uploadResult = cmd /c $uploadCmd 2>&1
-                                for ($i = 60; $i -le 100; $i += 10) {
-                                    $pbBackup.Value = $i
-                                    Start-Sleep -Milliseconds 200
-                                }
-                                $downloadLink = $null
-                                $uploadResult | ForEach-Object {
-                                    if ($_ -match 'https://mega\.nz/\S+') {
-                                        $downloadLink = $matches[0]
-                                    }
-                                }
-                                if (-not $downloadLink) {
-                                    $fileName  = [System.IO.Path]::GetFileName($zipToUpload)
-                                    $exportCmd = "megatools export --username `"$MegaUser`" --password `"$MegaPass`" /Root/$fileName"
-                                    $exportResult = cmd /c $exportCmd 2>&1
-                                    if ($exportResult -match 'https://mega\.nz/\S+') {
-                                        $downloadLink = $matches[0]
-                                    }
-                                }
-                                if ($downloadLink) {
-                                    $cleanLink = $downloadLink -replace '[^\x20-\x7E]', ''
-                                    [System.Windows.Forms.MessageBox]::Show(
-                                        "Subida exitosa.`nEnlace: $cleanLink`n(Copiado al portapapeles)",
-                                        "Éxito",
-                                        [System.Windows.Forms.MessageBoxButtons]::OK,
-                                        [System.Windows.Forms.MessageBoxIcon]::Information
-                                    )
-                                    $cleanLink | Set-Clipboard
-                                } else {
-                                    [System.Windows.Forms.MessageBox]::Show(
-                                        "Se completó la subida, pero no se pudo extraer el enlace.",
-                                        "Atención",
-                                        [System.Windows.Forms.MessageBoxButtons]::OK,
-                                        [System.Windows.Forms.MessageBoxIcon]::Warning
-                                    )
-                                }
-                                if (Test-Path $zipToUpload) {
-                                    Remove-Item $zipToUpload -Force
-                                }
-                            }
+                            [System.Windows.Forms.MessageBox]::Show(
+                                "La subida a nube está disponible en la versión WPF actual con Cloudflare R2.",
+                                "Función no disponible",
+                                [System.Windows.Forms.MessageBoxButtons]::OK,
+                                [System.Windows.Forms.MessageBoxIcon]::Information
+                            )
                         }
                     }
                     [System.Windows.Forms.Application]::DoEvents()

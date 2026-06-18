@@ -18,6 +18,14 @@ $ProjectRoot = $PSScriptRoot
 $SrcPath = Join-Path $ProjectRoot "src"
 $ReleasePath = Join-Path $ProjectRoot "release"
 $VersionFile = Join-Path $SrcPath "version.json"
+function Set-Utf8BomFile {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    $content = [System.IO.File]::ReadAllText($Path)
+    $encoding = New-Object System.Text.UTF8Encoding($true)
+    [System.IO.File]::WriteAllText($Path, $content, $encoding)
+}
 function Get-CurrentVersion {
     if (Test-Path $VersionFile) {
         try {
@@ -51,7 +59,7 @@ Describe "Pruebas iniciales" {
     }
 
     It "Deben existir los módulos" {
-        $modules = @("GUI.psm1", "Database.psm1", "Utilities.psm1", "SqlTreeView.psm1", "Installers.psm1", "WindowsUtilities.psm1", "NationalUtilities.psm1", "SqlOps.psm1", "QueriesPad.psm1")
+$modules = @("GUI.psm1", "Database.psm1", "Utilities.psm1", "SqlTreeView.psm1", "Installers.psm1", "WindowsUtilities.psm1", "NationalUtilities.psm1", "SqlOps.psm1", "QueriesPad.psm1", "AISqlContext.psm1", "AI.psm1")
         foreach ($module in $modules) {
             Test-Path ".\src\modules\$module" | Should -Be $true
         }
@@ -113,7 +121,8 @@ if ($Release) {
     Write-Host "Copiando archivos..." -ForegroundColor Yellow
     $mustHave = @(
         (Join-Path $SrcPath "lib\AvalonEdit.dll"),
-        (Join-Path $SrcPath "resources\SQL.xshd")
+        (Join-Path $SrcPath "resources\SQL.xshd"),
+        (Join-Path $SrcPath "resources\ai-sql-context.json")
     )
 
     foreach ($f in $mustHave) {
@@ -122,8 +131,13 @@ if ($Release) {
     Copy-Item -Path "$SrcPath\*" -Destination $ReleasePath -Recurse -Force
     $mainFile = Join-Path $ReleasePath "main.ps1"
     if (Test-Path $mainFile) {
-        (Get-Content $mainFile) -replace '\$global:version = ".*?"', "`$global:version = `"$versionString`"" |
-        Out-File $mainFile -Encoding UTF8
+        $mainContent = Get-Content $mainFile -Raw
+        $mainContent = $mainContent -replace '\$global:version = ".*?"', "`$global:version = `"$versionString`""
+        $encoding = New-Object System.Text.UTF8Encoding($true)
+        [System.IO.File]::WriteAllText($mainFile, $mainContent, $encoding)
+    }
+    Get-ChildItem -Path $ReleasePath -Recurse -Include *.ps1, *.psm1, *.psd1 | ForEach-Object {
+        Set-Utf8BomFile -Path $_.FullName
     }
     @'
 @echo off

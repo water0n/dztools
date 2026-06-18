@@ -696,9 +696,6 @@ function Test-SameHost {
 function Test-7ZipInstalled {
     return (Test-Path "C:\Program Files\7-Zip\7z.exe")
 }
-function Test-MegaToolsInstalled {
-    return ([bool](Get-Command megatools -ErrorAction SilentlyContinue))
-}
 function Show-WarnDialog {
     [CmdletBinding()]
     param(
@@ -1896,12 +1893,12 @@ function Set-AdaptersToPrivate {
     }
 }
 Export-ModuleMember -Function @(
-    'Get-DzToolsConfigPath', 'Get-DzDebugPreference', 'Get-DzUiMode', 'Set-DzUiMode',
+    'Get-DzToolsConfigPath', 'Get-DzDebugPreference', 'Get-DzUiMode', 'Set-DzUiMode', 'Update-DzIniSetting',
     'Set-DzDebugPreference', 'Initialize-DzToolsConfig', 'Get-DzIniSectionMap', 'Get-DzSavedSqlConnections',
     'Get-DzSavedSqlConnection', 'Save-DzSqlConnection', 'Write-DzDebug', 'Test-Administrator',
     'Get-SystemInfo', 'Clear-TemporaryFiles', 'Test-ChocolateyInstalled', 'Install-Chocolatey',
     'Get-AdminGroupName', 'Invoke-DiskCleanup', 'Stop-CleanmgrProcesses', 'Test-SameHost',
-    'Test-7ZipInstalled', 'Test-MegaToolsInstalled', 'Download-FileWithProgressWpfStream', 'Refresh-AdapterStatus',
+    'Test-7ZipInstalled', 'Download-FileWithProgressWpfStream', 'Refresh-AdapterStatus',
     'Get-NetworkAdapterStatus', 'Get-SqlPortWithDebug', 'Show-SqlPortsInfo', 'Show-WarnDialog',
     'Get-7ZipPath', 'Install-7ZipWithChoco', 'Show-SQLselector', 'get-NSApplicationsIniReport',
     'Set-ClipboardTextSafe', 'Initialize-SystemInfo', 'Update-PortsUI', 'Update-NetworkUI',

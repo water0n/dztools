@@ -48,7 +48,7 @@ function Install-Software {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet('SQL2014', 'SQL2019', 'SSMS', '7Zip', 'MegaTools')]
+        [ValidateSet('SQL2014', 'SQL2019', 'SSMS', '7Zip')]
         [string]$Software,
         [Parameter(Mandatory = $false)]
         [switch]$Force
@@ -83,10 +83,6 @@ function Install-Software {
         '7Zip' {
             Write-Host "Instalando 7-Zip..." -ForegroundColor Cyan
             $arguments = @('install', '7zip', '-y')
-        }
-        'MegaTools' {
-            Write-Host "Instalando MegaTools..." -ForegroundColor Cyan
-            $arguments = @('install', 'megatools', '-y')
         }
     }
     try {
@@ -348,9 +344,6 @@ function Test-7ZipInstalled {
         if (Test-Path $path) { return $true }
     }
     return $false
-}
-function Test-MegaToolsInstalled {
-    return $null -ne (Get-Command megatools -ErrorAction SilentlyContinue)
 }
 function Get-InstalledChocoPackages {
     if (-not (Test-ChocolateyInstalled)) {
@@ -1362,7 +1355,7 @@ function Invoke-LectorDP {
 }
 Export-ModuleMember -Function @(
     'Check-Chocolatey', 'Test-ChocolateyInstalled', 'Install-Software', 'Download-File',
-    'Expand-ArchiveFile', 'Show-SSMSInstallerDialog', 'Test-7ZipInstalled', 'Test-MegaToolsInstalled',
+    'Expand-ArchiveFile', 'Show-SSMSInstallerDialog', 'Test-7ZipInstalled',
     'Get-InstalledChocoPackages', 'Search-ChocoPackages', 'Install-ChocoPackage', 'Uninstall-ChocoPackage',
     'Show-ChocolateyInstallerMenu', 'Invoke-PortableTool', 'Invoke-LectorDP'
 )
