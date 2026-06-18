@@ -1502,8 +1502,8 @@ function Show-DatabaseRepairDialog {
                 <CheckBox x:Name="chkCloseConnections" IsChecked="True" Margin="0,0,0,8">
                   <TextBlock TextWrapping="Wrap">Cerrar conexiones activas (SINGLE_USER)</TextBlock>
                 </CheckBox>
-                <CheckBox x:Name="chkEmergencyMode" IsChecked="True">
-                  <TextBlock TextWrapping="Wrap">Poner en modo EMERGENCY antes de reparar</TextBlock>
+                <CheckBox x:Name="chkEmergencyMode" IsChecked="False">
+                  <TextBlock TextWrapping="Wrap">Poner en modo EMERGENCY (solo REPAIR_ALLOW_DATA_LOSS)</TextBlock>
                 </CheckBox>
               </StackPanel>
             </Border>
@@ -1613,11 +1613,26 @@ function Show-DatabaseRepairDialog {
       param($Server, $Database, $RepairOption, $CloseConnections, $EmergencyMode, $Credential, $LogQueue, $ProgressQueue)
       function EnqLog([string]$m) { $LogQueue.Enqueue(("{0} {1}" -f (Get-Date -Format 'HH:mm:ss'), $m)) }
       function EnqProg([int]$p, [string]$m) { $ProgressQueue.Enqueue(@{Percent = $p; Message = $m }) }
+      function Format-RepairDuration([long]$Ms) {
+        if ($Ms -ge 1000) { return ("{0:0.0}s" -f ($Ms / 1000)) }
+        return "$Ms ms"
+      }
       function Invoke-SqlQueryLite {
-        param([string]$Server, [string]$Database, [string]$Query, [System.Management.Automation.PSCredential]$Credential)
+        param(
+          [string]$Server,
+          [string]$Database,
+          [string]$Query,
+          [System.Management.Automation.PSCredential]$Credential,
+          [int]$CommandTimeoutSeconds = 0,
+          [string]$StepName = "consulta SQL"
+        )
         $connection = $null
+        $cmd = $null
+        $reader = $null
         $passwordBstr = [IntPtr]::Zero
         $plainPassword = $null
+        $messages = New-Object System.Collections.ArrayList
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
         try {
           $passwordBstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Credential.Password)
           $plainPassword = [Runtime.InteropServices.Marshal]::PtrToStringUni($passwordBstr)
@@ -1626,9 +1641,8 @@ function Show-DatabaseRepairDialog {
           $connection.Open()
           $cmd = $connection.CreateCommand()
           $cmd.CommandText = $Query
-          $cmd.CommandTimeout = 0
+          $cmd.CommandTimeout = $CommandTimeoutSeconds
           $reader = $cmd.ExecuteReader()
-          $messages = New-Object System.Collections.ArrayList
           do {
             while ($reader.Read()) {
               for ($i = 0; $i -lt $reader.FieldCount; $i++) {
@@ -1638,77 +1652,125 @@ function Show-DatabaseRepairDialog {
             }
           } while ($reader.NextResult())
           $reader.Close()
-          @{ Success = $true; Messages = $messages }
+          @{ Success = $true; Messages = $messages; DurationMs = $stopwatch.ElapsedMilliseconds; TimedOut = $false }
         } catch {
-          @{ Success = $false; ErrorMessage = $_.Exception.Message }
+          $timedOut = $false
+          try {
+            if ($_.Exception -is [System.Data.SqlClient.SqlException]) {
+              foreach ($err in $_.Exception.Errors) {
+                if ($err.Number -eq -2) { $timedOut = $true; break }
+              }
+            }
+          } catch { }
+          $message = $_.Exception.Message
+          if ($CommandTimeoutSeconds -gt 0 -and ($timedOut -or $message -match '(?i)(timeout|tiempo de espera)')) {
+            $timedOut = $true
+            $message = "SQL Server no respondió en $CommandTimeoutSeconds segundos al intentar $StepName. Puede haber conexiones activas, bloqueos o una recuperación pendiente. Revisa el estado de la base de datos antes de reintentar."
+          }
+          @{ Success = $false; ErrorMessage = $message; Messages = $messages; DurationMs = $stopwatch.ElapsedMilliseconds; TimedOut = $timedOut }
         } finally {
+          try { if ($reader) { $reader.Close(); $reader.Dispose() } } catch { }
+          try { if ($cmd) { $cmd.Dispose() } } catch { }
           if ($plainPassword) { $plainPassword = $null }
           if ($passwordBstr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordBstr) }
           if ($connection) { try { $connection.Close(); $connection.Dispose() } catch { } }
+          try { $stopwatch.Stop() } catch { }
         }
       }
       try {
         $safeName = $Database -replace ']', ']]'
+        $adminTimeoutSeconds = 60
+        $restoreWarning = $null
+        function Restore-RepairMultiUser {
+          EnqProg ([int](($currentStep / $steps) * 90)) "Restaurando acceso normal..."
+          EnqLog "🔓 Restaurando modo MULTI_USER"
+          $restoreQuery = "ALTER DATABASE [$safeName] SET MULTI_USER"
+          $restoreResult = Invoke-SqlQueryLite -Server $Server -Database "master" -Query $restoreQuery -Credential $Credential -CommandTimeoutSeconds $adminTimeoutSeconds -StepName "restaurar modo MULTI_USER"
+          if (-not $restoreResult.Success) {
+            $msg = "No se pudo restaurar MULTI_USER: $($restoreResult.ErrorMessage). Puede requerir intervención manual en SQL Server."
+            EnqLog "⚠️ Advertencia: $msg"
+            return $msg
+          }
+          EnqLog "✅ Modo MULTI_USER restaurado ($(Format-RepairDuration $restoreResult.DurationMs))"
+          return $null
+        }
         $steps = 0
         $currentStep = 0
-        if ($EmergencyMode -and $RepairOption -ne "CHECK") { $steps++ }
-        if ($CloseConnections) { $steps++ }
+        $requiresSingleUser = $RepairOption -ne "CHECK"
+        $useSingleUser = $CloseConnections -or $requiresSingleUser
+        $useEmergency = $EmergencyMode -and $RepairOption -eq "REPAIR_ALLOW_DATA_LOSS"
+        if ($useSingleUser) { $steps++ }
+        if ($useEmergency) { $steps++ }
         $steps++
-        if ($CloseConnections) { $steps++ }
-        if ($EmergencyMode -and $RepairOption -ne "CHECK") {
-          $currentStep++
-          EnqProg ([int](($currentStep / $steps) * 90)) "Configurando modo EMERGENCY..."
-          EnqLog "🔧 Configurando base de datos en modo EMERGENCY"
-          $emergencyQuery = "ALTER DATABASE [$safeName] SET EMERGENCY"
-          $result = Invoke-SqlQueryLite -Server $Server -Database "master" -Query $emergencyQuery -Credential $Credential
-          if (-not $result.Success) {
-            EnqProg 0 "Error"
-            EnqLog "❌ Error al configurar modo EMERGENCY: $($result.ErrorMessage)"
-            EnqLog "ERROR_RESULT|$($result.ErrorMessage)"
-            EnqLog "__DONE__"
-            return
+        if ($useSingleUser) { $steps++ }
+        if ($requiresSingleUser -and -not $CloseConnections) { EnqLog "ℹ️ SINGLE_USER es requerido para reparar; se aplicará automáticamente." }
+        if ($EmergencyMode -and -not $useEmergency) {
+          if ($RepairOption -eq "CHECK") {
+            EnqLog "ℹ️ Modo EMERGENCY omitido para solo verificación (CHECK)."
+          } else {
+            EnqLog "ℹ️ Modo EMERGENCY omitido: SQL Server solo permite reparar en EMERGENCY con REPAIR_ALLOW_DATA_LOSS."
           }
-          EnqLog "✅ Modo EMERGENCY configurado"
         }
-        if ($CloseConnections) {
+        if ($useSingleUser) {
           $currentStep++
           EnqProg ([int](($currentStep / $steps) * 90)) "Cerrando conexiones..."
           EnqLog "🔒 Cerrando conexiones existentes (SINGLE_USER)"
           $closeQuery = "ALTER DATABASE [$safeName] SET SINGLE_USER WITH ROLLBACK IMMEDIATE"
-          $result = Invoke-SqlQueryLite -Server $Server -Database "master" -Query $closeQuery -Credential $Credential
+          $result = Invoke-SqlQueryLite -Server $Server -Database "master" -Query $closeQuery -Credential $Credential -CommandTimeoutSeconds $adminTimeoutSeconds -StepName "cerrar conexiones existentes"
           if (-not $result.Success) {
             EnqProg 0 "Error"
             EnqLog "❌ Error al cerrar conexiones: $($result.ErrorMessage)"
-            EnqLog "ERROR_RESULT|$($result.ErrorMessage)"
+            $restoreWarning = Restore-RepairMultiUser
+            $finalError = $result.ErrorMessage
+            if ($restoreWarning) { $finalError = "$finalError`n`nAdvertencia: $restoreWarning" }
+            EnqLog "ERROR_RESULT|$finalError"
             EnqLog "__DONE__"
             return
           }
-          EnqLog "✅ Conexiones cerradas"
+          EnqLog "✅ Conexiones cerradas ($(Format-RepairDuration $result.DurationMs))"
+        }
+        if ($useEmergency) {
+          $currentStep++
+          EnqProg ([int](($currentStep / $steps) * 90)) "Configurando modo EMERGENCY..."
+          EnqLog "🔧 Configurando base de datos en modo EMERGENCY"
+          $emergencyQuery = "ALTER DATABASE [$safeName] SET EMERGENCY"
+          $result = Invoke-SqlQueryLite -Server $Server -Database "master" -Query $emergencyQuery -Credential $Credential -CommandTimeoutSeconds $adminTimeoutSeconds -StepName "configurar modo EMERGENCY"
+          if (-not $result.Success) {
+            EnqProg 0 "Error"
+            EnqLog "❌ Error al configurar modo EMERGENCY: $($result.ErrorMessage)"
+            if ($useSingleUser) { $restoreWarning = Restore-RepairMultiUser }
+            $finalError = $result.ErrorMessage
+            if ($restoreWarning) { $finalError = "$finalError`n`nAdvertencia: $restoreWarning" }
+            EnqLog "ERROR_RESULT|$finalError"
+            EnqLog "__DONE__"
+            return
+          }
+          EnqLog "✅ Modo EMERGENCY configurado ($(Format-RepairDuration $result.DurationMs))"
         }
         $currentStep++
         $actionText = if ($RepairOption -eq "CHECK") { "Verificando integridad..." } else { "Ejecutando reparación..." }
         EnqProg ([int](($currentStep / $steps) * 90)) $actionText
+        EnqLog "✅ Preparación completada; iniciando DBCC CHECKDB."
         EnqLog "🔍 Ejecutando DBCC CHECKDB ($RepairOption)"
+        EnqLog "⏳ Esta fase puede tardar varios minutos u horas según el tamaño y daño de la base. No tiene timeout automático."
         $dbccQuery = switch ($RepairOption) {
           "CHECK" { "DBCC CHECKDB([$safeName]) WITH NO_INFOMSGS" }
           "REPAIR_FAST" { "DBCC CHECKDB([$safeName], REPAIR_FAST) WITH NO_INFOMSGS" }
           "REPAIR_REBUILD" { "DBCC CHECKDB([$safeName], REPAIR_REBUILD) WITH NO_INFOMSGS" }
           "REPAIR_ALLOW_DATA_LOSS" { "DBCC CHECKDB([$safeName], REPAIR_ALLOW_DATA_LOSS) WITH NO_INFOMSGS" }
         }
-        $result = Invoke-SqlQueryLite -Server $Server -Database "master" -Query $dbccQuery -Credential $Credential
+        $result = Invoke-SqlQueryLite -Server $Server -Database "master" -Query $dbccQuery -Credential $Credential -CommandTimeoutSeconds 0 -StepName "ejecutar DBCC CHECKDB ($RepairOption)"
         if (-not $result.Success) {
           EnqProg 0 "Error"
           EnqLog "❌ Error ejecutando DBCC: $($result.ErrorMessage)"
-          if ($CloseConnections) {
-            try {
-              $restoreQuery = "ALTER DATABASE [$safeName] SET MULTI_USER"
-              Invoke-SqlQueryLite -Server $Server -Database "master" -Query $restoreQuery -Credential $Credential | Out-Null
-            } catch { }
-          }
-          EnqLog "ERROR_RESULT|$($result.ErrorMessage)"
+          if ($useSingleUser) { $restoreWarning = Restore-RepairMultiUser }
+          $finalError = $result.ErrorMessage
+          if ($restoreWarning) { $finalError = "$finalError`n`nAdvertencia: $restoreWarning" }
+          EnqLog "ERROR_RESULT|$finalError"
           EnqLog "__DONE__"
           return
         }
+        EnqLog "✅ DBCC CHECKDB finalizó ($(Format-RepairDuration $result.DurationMs))"
         $hasErrors = $false
         foreach ($msg in $result.Messages) {
           EnqLog "[DBCC] $msg"
@@ -1717,18 +1779,18 @@ function Show-DatabaseRepairDialog {
         if ($result.Messages.Count -eq 0) { EnqLog "✅ No se encontraron problemas de integridad" }
         elseif (-not $hasErrors) { EnqLog "✅ Verificación completada sin errores críticos" }
         else { EnqLog "⚠️ Se encontraron problemas de integridad" }
-        if ($CloseConnections) {
+        if ($useSingleUser) {
           $currentStep++
-          EnqProg ([int](($currentStep / $steps) * 90)) "Restaurando acceso normal..."
-          EnqLog "🔓 Restaurando modo MULTI_USER"
-          $restoreQuery = "ALTER DATABASE [$safeName] SET MULTI_USER"
-          $result = Invoke-SqlQueryLite -Server $Server -Database "master" -Query $restoreQuery -Credential $Credential
-          if (-not $result.Success) { EnqLog "⚠️ Advertencia: No se pudo restaurar MULTI_USER: $($result.ErrorMessage)" }
-          else { EnqLog "✅ Modo MULTI_USER restaurado" }
+          $restoreWarning = Restore-RepairMultiUser
         }
         EnqProg 100 "Operación completada"
-        EnqLog "✅ Proceso completado exitosamente"
-        EnqLog "SUCCESS_RESULT|Operación completada. Revisa el log para detalles."
+        if ($restoreWarning) {
+          EnqLog "⚠️ Proceso completado con advertencias"
+          EnqLog "SUCCESS_RESULT|Operación completada, pero no se pudo restaurar el acceso normal automáticamente.`n`n$restoreWarning"
+        } else {
+          EnqLog "✅ Proceso completado exitosamente"
+          EnqLog "SUCCESS_RESULT|Operación completada. Revisa el log para detalles."
+        }
         EnqLog "__DONE__"
       } catch {
         EnqProg 0 "Error"
@@ -1758,7 +1820,7 @@ function Show-DatabaseRepairDialog {
           if (-not $logQueue.TryDequeue([ref]$line)) { break }
           if ($line -like "*SUCCESS_RESULT|*") { $finalResult = @{ Success = $true; Message = $line -replace '^.*SUCCESS_RESULT\|', '' } }
           if ($line -like "*ERROR_RESULT|*") { $finalResult = @{ Success = $false; Message = $line -replace '^.*ERROR_RESULT\|', '' } }
-          if ($line -notmatch '(SUCCESS_RESULT|ERROR_RESULT)') {
+          if ($line -notmatch '(SUCCESS_RESULT|ERROR_RESULT|__DONE__)') {
             $txtLog.AppendText("$line`n")
             $txtLog.ScrollToEnd()
           }
@@ -1769,7 +1831,8 @@ function Show-DatabaseRepairDialog {
             $btnIniciar.Content = "Iniciar"
             $tmp = $null
             while ($progressQueue.TryDequeue([ref]$tmp)) { }
-            Paint-Progress -Percent 100 -Message "Completado"
+            if ($finalResult -and -not $finalResult.Success) { Paint-Progress -Percent 0 -Message "Error" }
+            else { Paint-Progress -Percent 100 -Message "Completado" }
             $script:RepairDone = $true
             if ($finalResult) {
               $window.Dispatcher.Invoke([action] {
@@ -3310,54 +3373,70 @@ function Show-BackupDialog {
             <Grid.RowDefinitions>
               <RowDefinition Height="Auto"/>
               <RowDefinition Height="Auto"/>
-              <RowDefinition Height="Auto"/>
-              <RowDefinition Height="Auto"/>
-              <RowDefinition Height="Auto"/>
-              <RowDefinition Height="Auto"/>
-              <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <TextBlock Grid.Row="0" Text="Opciones" Style="{StaticResource CardTitleStyle}"/>
-
-            <!-- Carpeta destino en servidor (NUEVO) -->
-            <TextBlock Grid.Row="1" Text="Carpeta destino en servidor:" FontWeight="SemiBold" Margin="0,0,0,6"/>
-            <Grid Grid.Row="2" Margin="0,0,0,10">
+            <Grid Grid.Row="0" Margin="0,0,0,8">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
               </Grid.ColumnDefinitions>
-              <TextBox Grid.Column="0" Name="txtServerBackupFolder" Style="{StaticResource TextBoxStyle}" IsReadOnly="True"/>
-              <Button Name="btnBrowseServerBackupFolder" Grid.Column="1" Content="🗂️ Servidor" Style="{StaticResource SecondaryButtonStyle}" Width="120" Margin="10,0,0,0" ToolTip="Explorar carpetas en el servidor SQL"/>
+              <TextBlock Grid.Column="0" Text="Opciones" Style="{StaticResource CardTitleStyle}" Margin="0,0,10,0"/>
+              <Button x:Name="btnToggleOptions" Grid.Column="1" Content="Ocultar opciones" Style="{StaticResource SecondaryButtonStyle}" Width="130" Height="26" Padding="8,2" ToolTip="Mostrar u ocultar las opciones para ampliar el log"/>
             </Grid>
 
-            <CheckBox x:Name="chkRespaldo" Grid.Row="3" Style="{StaticResource CheckBoxStyle}" IsChecked="True" IsEnabled="False">
-              <TextBlock Text="Respaldar" FontWeight="SemiBold"/>
-            </CheckBox>
-            <TextBlock Grid.Row="4" Text="Nombre del respaldo:" Margin="0,2,0,6"/>
-            <TextBox x:Name="txtNombre" Grid.Row="5" Style="{StaticResource TextBoxStyle}" />
-
-            <Grid Grid.Row="6" Margin="0,10,0,0">
+            <Grid x:Name="pnlBackupOptionsBody" Grid.Row="1">
               <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
               </Grid.RowDefinitions>
-              <CheckBox x:Name="chkComprimir" Grid.Row="0" Style="{StaticResource CheckBoxStyle}">
-                <TextBlock Text="Comprimir (requiere Chocolatey + 7-Zip)" FontWeight="SemiBold"/>
-              </CheckBox>
-              <TextBlock x:Name="lblPassword" Grid.Row="1" Text="Contraseña (opcional) para ZIP:" Margin="0,2,0,6"/>
-              <Grid Grid.Row="2">
+
+              <TextBlock Grid.Row="0" Text="Carpeta destino en servidor:" FontWeight="SemiBold" Margin="0,0,0,6"/>
+              <Grid Grid.Row="1" Margin="0,0,0,10">
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition Width="*"/>
                   <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <PasswordBox x:Name="txtPassword" Grid.Column="0" Style="{StaticResource PasswordBoxStyle}"/>
-                <Button x:Name="btnTogglePassword" Grid.Column="1" Content="👁" Width="34" Height="34" Margin="8,0,0,0" Style="{StaticResource SecondaryButtonStyle}"/>
+                <TextBox Grid.Column="0" Name="txtServerBackupFolder" Style="{StaticResource TextBoxStyle}" IsReadOnly="True"/>
+                <Button Name="btnBrowseServerBackupFolder" Grid.Column="1" Content="🗂️ Servidor" Style="{StaticResource SecondaryButtonStyle}" Width="120" Margin="10,0,0,0" ToolTip="Explorar carpetas en el servidor SQL"/>
               </Grid>
-              <CheckBox x:Name="chkSubir" Grid.Row="3" Style="{StaticResource CheckBoxStyle}" Margin="0,10,0,0" IsEnabled="False" IsChecked="False">
-                <TextBlock Text="Subir a Mega.nz (opción deshabilitada)" FontWeight="SemiBold"/>
+
+              <CheckBox x:Name="chkRespaldo" Grid.Row="2" Style="{StaticResource CheckBoxStyle}" IsChecked="True" IsEnabled="False">
+                <TextBlock Text="Respaldar" FontWeight="SemiBold"/>
               </CheckBox>
+              <TextBlock Grid.Row="3" Text="Nombre del respaldo:" Margin="0,2,0,6"/>
+              <TextBox x:Name="txtNombre" Grid.Row="4" Style="{StaticResource TextBoxStyle}" />
+
+              <Grid Grid.Row="5" Margin="0,10,0,0">
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto"/>
+                  <RowDefinition Height="Auto"/>
+                  <RowDefinition Height="Auto"/>
+                  <RowDefinition Height="Auto"/>
+                  <RowDefinition Height="Auto"/>
+                  <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <CheckBox x:Name="chkComprimir" Grid.Row="0" Style="{StaticResource CheckBoxStyle}">
+                  <TextBlock Text="Comprimir (requiere Chocolatey + 7-Zip)" FontWeight="SemiBold"/>
+                </CheckBox>
+                <TextBlock x:Name="lblPassword" Grid.Row="1" Text="Contraseña (opcional) para ZIP:" Margin="0,2,0,6"/>
+                <Grid Grid.Row="2">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                  </Grid.ColumnDefinitions>
+                  <PasswordBox x:Name="txtPassword" Grid.Column="0" Style="{StaticResource PasswordBoxStyle}"/>
+                  <Button x:Name="btnTogglePassword" Grid.Column="1" Content="👁" Width="34" Height="34" Margin="8,0,0,0" Style="{StaticResource SecondaryButtonStyle}"/>
+                </Grid>
+                <CheckBox x:Name="chkSubir" Grid.Row="3" Style="{StaticResource CheckBoxStyle}" Margin="0,10,0,0" IsChecked="False" ToolTip="Requiere compresión y acceso nube configurado">
+                  <TextBlock Text="Subir a nube (R2)" FontWeight="SemiBold"/>
+                </CheckBox>
+                <PasswordBox x:Name="pwdCloudSecret" Grid.Row="4" Style="{StaticResource PasswordBoxStyle}" Margin="0,4,0,0" ToolTip="Secret/token de nube. No se guarda; debes capturarlo cada vez."/>
+                <Button x:Name="btnConfigurarNube" Grid.Row="5" Content="Configurar URL nube" Style="{StaticResource SecondaryButtonStyle}" Width="170" HorizontalAlignment="Left" Margin="0,6,0,0"/>
+              </Grid>
             </Grid>
           </Grid>
         </Border>
@@ -3452,6 +3531,7 @@ function Show-BackupDialog {
   $txtPassword = Get-Ctrl "txtPassword"
   $lblPassword = Get-Ctrl "lblPassword"
   $chkSubir = Get-Ctrl "chkSubir"
+  $pwdCloudSecret = Get-Ctrl "pwdCloudSecret"
   $pbBackup = Get-Ctrl "pbBackup"
   $txtProgress = Get-Ctrl "txtProgress"
   $txtLog = Get-Ctrl "txtLog"
@@ -3459,6 +3539,9 @@ function Show-BackupDialog {
   $btnAbrirCarpeta = Get-Ctrl "btnAbrirCarpeta"
   $btnCerrar = Get-Ctrl "btnCerrar"
   $btnTogglePassword = Get-Ctrl "btnTogglePassword"
+  $btnToggleOptions = Get-Ctrl "btnToggleOptions"
+  $pnlBackupOptionsBody = Get-Ctrl "pnlBackupOptionsBody"
+  $btnConfigurarNube = Get-Ctrl "btnConfigurarNube"
   $headerBar = Get-Ctrl "HeaderBar"
   $btnClose = Get-Ctrl "btnClose"
   if ($txtServerBackupFolder) {
@@ -3466,7 +3549,7 @@ function Show-BackupDialog {
     Write-DzDebug "`t[DEBUG][Show-BackupDialog] Carpeta por omisión establecida: $defaultBackupPath"
   }
 
-  Write-DzDebug "`t[DEBUG][Show-BackupDialog] Controles: chkRespaldo=$([bool]$chkRespaldo) txtNombre=$([bool]$txtNombre) chkComprimir=$([bool]$chkComprimir) txtPassword=$([bool]$txtPassword) lblPassword=$([bool]$lblPassword) chkSubir=$([bool]$chkSubir) pbBackup=$([bool]$pbBackup) txtProgress=$([bool]$txtProgress) txtLog=$([bool]$txtLog) btnAceptar=$([bool]$btnAceptar) btnAbrirCarpeta=$([bool]$btnAbrirCarpeta) btnCerrar=$([bool]$btnCerrar) btnTogglePassword=$([bool]$btnTogglePassword)"
+  Write-DzDebug "`t[DEBUG][Show-BackupDialog] Controles: chkRespaldo=$([bool]$chkRespaldo) txtNombre=$([bool]$txtNombre) chkComprimir=$([bool]$chkComprimir) txtPassword=$([bool]$txtPassword) lblPassword=$([bool]$lblPassword) chkSubir=$([bool]$chkSubir) pwdCloudSecret=$([bool]$pwdCloudSecret) btnConfigurarNube=$([bool]$btnConfigurarNube) btnToggleOptions=$([bool]$btnToggleOptions) pnlBackupOptionsBody=$([bool]$pnlBackupOptionsBody) pbBackup=$([bool]$pbBackup) txtProgress=$([bool]$txtProgress) txtLog=$([bool]$txtLog) btnAceptar=$([bool]$btnAceptar) btnAbrirCarpeta=$([bool]$btnAbrirCarpeta) btnCerrar=$([bool]$btnCerrar) btnTogglePassword=$([bool]$btnTogglePassword)"
   $window.WindowStartupLocation = "Manual"
   $window.Add_Loaded({
       try {
@@ -3523,7 +3606,7 @@ function Show-BackupDialog {
         Safe-CloseWindow -Window $window -Result $false
       }
     })
-  if (-not $txtNombre -or -not $txtServerBackupFolder -or -not $btnBrowseServerBackupFolder -or -not $chkComprimir -or -not $txtPassword -or -not $lblPassword -or -not $chkSubir -or -not $pbBackup -or -not $txtProgress -or -not $txtLog -or -not $btnAceptar -or -not $btnAbrirCarpeta -or -not $btnCerrar) {
+  if (-not $txtNombre -or -not $txtServerBackupFolder -or -not $btnBrowseServerBackupFolder -or -not $chkComprimir -or -not $txtPassword -or -not $lblPassword -or -not $chkSubir -or -not $pwdCloudSecret -or -not $btnConfigurarNube -or -not $btnToggleOptions -or -not $pnlBackupOptionsBody -or -not $pbBackup -or -not $txtProgress -or -not $txtLog -or -not $btnAceptar -or -not $btnAbrirCarpeta -or -not $btnCerrar) {
     Write-DzDebug "`t[DEBUG][Show-BackupDialog] ERROR: uno o más controles son NULL. Cerrando..."
     throw "Controles WPF incompletos (FindName devolvió NULL)."
   }
@@ -3532,8 +3615,34 @@ function Show-BackupDialog {
   $txtNombre.Text = ("$Database-$timestampsDefault.bak")
   $txtPassword.IsEnabled = $false
   $lblPassword.IsEnabled = $false
-  $chkSubir.IsEnabled = $false
-  $chkSubir.IsChecked = $false
+  $script:BackupOptionsExpanded = $true
+  function Set-BackupOptionsExpanded {
+    param([bool]$Expanded)
+    $script:BackupOptionsExpanded = $Expanded
+    if ($Expanded) {
+      $pnlBackupOptionsBody.Visibility = [System.Windows.Visibility]::Visible
+      $btnToggleOptions.Content = "Ocultar opciones"
+    } else {
+      $pnlBackupOptionsBody.Visibility = [System.Windows.Visibility]::Collapsed
+      $btnToggleOptions.Content = "Mostrar opciones"
+    }
+  }
+  $btnToggleOptions.Add_Click({
+      Set-BackupOptionsExpanded -Expanded (-not $script:BackupOptionsExpanded)
+    })
+  function Update-CloudUploadUI {
+    $cloudReady = $false
+    try { $cloudReady = Test-R2CloudConfigured } catch { $cloudReady = $false }
+    $chkSubir.IsEnabled = ($chkComprimir.IsChecked -eq $true) -and $cloudReady
+    $pwdCloudSecret.IsEnabled = ($chkSubir.IsChecked -eq $true) -and $chkSubir.IsEnabled
+    if (-not $chkSubir.IsEnabled) { $chkSubir.IsChecked = $false; $pwdCloudSecret.Password = "" }
+    if ($cloudReady) {
+      $chkSubir.ToolTip = "Subirá el ZIP comprimido a Cloudflare R2. Debes capturar el secret cada vez."
+    } else {
+      $chkSubir.ToolTip = "Configura la URL del Worker primero"
+    }
+  }
+  Update-CloudUploadUI
 
   $logQueue = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
   $progressQueue = New-Object 'System.Collections.Concurrent.ConcurrentQueue[hashtable]'
@@ -3543,6 +3652,44 @@ function Show-BackupDialog {
   function Add-Log { param([string]$Message) $logQueue.Enqueue(("{0} {1}" -f (Get-Date -Format 'HH:mm:ss'), $Message)) }
   function Disable-CompressionUI { $chkComprimir.IsChecked = $false; $txtPassword.IsEnabled = $false; $lblPassword.IsEnabled = $false; $txtPassword.Password = "" }
   function New-SafeCredential { param([string]$Username, [string]$PlainPassword) $secure = New-Object System.Security.SecureString; foreach ($ch in $PlainPassword.ToCharArray()) { $secure.AppendChar($ch) }; $secure.MakeReadOnly(); New-Object System.Management.Automation.PSCredential($Username, $secure) }
+  function Get-RemoteBackupAccessInfo {
+    param(
+      [Parameter(Mandatory = $true)][string]$MachineName,
+      [Parameter(Mandatory = $true)][string]$SqlBackupFolder
+    )
+    $folderPart = $SqlBackupFolder -replace '^[A-Za-z]:', ''
+    $driveShare = "{0}$" -f $SqlBackupFolder[0]
+    $adminUncFolder = "\\$MachineName\$driveShare$folderPart"
+    $leaf = Split-Path -Path $SqlBackupFolder -Leaf
+    $sharedUncFolder = if ([string]::IsNullOrWhiteSpace($leaf)) { $null } else { "\\$MachineName\$leaf" }
+    $selectedFolder = $adminUncFolder
+    $selectedKind = "admin"
+    $isAccessible = $false
+
+    try {
+      if (Test-Path $adminUncFolder -ErrorAction Stop) {
+        $isAccessible = $true
+      }
+    } catch {}
+
+    if (-not $isAccessible -and $sharedUncFolder) {
+      try {
+        if (Test-Path $sharedUncFolder -ErrorAction Stop) {
+          $selectedFolder = $sharedUncFolder
+          $selectedKind = "share"
+          $isAccessible = $true
+        }
+      } catch {}
+    }
+
+    [PSCustomObject]@{
+      Folder       = $selectedFolder
+      AdminFolder  = $adminUncFolder
+      SharedFolder = $sharedUncFolder
+      IsAccessible = $isAccessible
+      Kind         = $selectedKind
+    }
+  }
   function Start-BackupWorkAsync {
     param(
       [string]$Server,
@@ -3552,14 +3699,80 @@ function Show-BackupDialog {
       [bool]$DoCompress,
       [string]$ZipPassword,
       [System.Management.Automation.PSCredential]$Credential,
+      [bool]$DoCloudUpload,
+      [string]$CloudWorkerUrl,
+      [string]$CloudToken,
       [System.Collections.Concurrent.ConcurrentQueue[string]]$LogQueue,
       [System.Collections.Concurrent.ConcurrentQueue[hashtable]]$ProgressQueue
     )
     Write-DzDebug "`t[DEBUG][Start-BackupWorkAsync] Preparando runspace..."
     $worker = {
-      param($Server, $Database, $BackupQuery, $ScriptBackupPath, $DoCompress, $ZipPassword, $Credential, $LogQueue, $ProgressQueue)
+      param($Server, $Database, $BackupQuery, $ScriptBackupPath, $DoCompress, $ZipPassword, $Credential, $DoCloudUpload, $CloudWorkerUrl, $CloudToken, $LogQueue, $ProgressQueue)
       function EnqLog([string]$m) { $LogQueue.Enqueue(("{0} {1}" -f (Get-Date -Format 'HH:mm:ss'), $m)) }
       function EnqProg([int]$p, [string]$m) { $ProgressQueue.Enqueue(@{Percent = $p; Message = $m }) }
+      function Invoke-WorkerJson {
+        param([string]$Path, [hashtable]$Body)
+        $uri = "{0}{1}" -f $CloudWorkerUrl.TrimEnd('/'), $Path
+        $headers = @{ Authorization = "Bearer $CloudToken" }
+        $json = $Body | ConvertTo-Json -Depth 6 -Compress
+        try {
+          Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $json -ContentType "application/json" -ErrorAction Stop
+        } catch {
+          $message = $_.Exception.Message
+          try {
+            $response = $_.Exception.Response
+            if ($response) {
+              $stream = $response.GetResponseStream()
+              if ($stream) {
+                $reader = New-Object System.IO.StreamReader($stream)
+                $bodyText = $reader.ReadToEnd()
+                if (-not [string]::IsNullOrWhiteSpace($bodyText)) { $message = $bodyText }
+              }
+            }
+          } catch {}
+          throw "Error llamando al Worker: $message"
+        }
+      }
+      function Send-FileToPresignedUrl {
+        param([string]$FilePath, [string]$UploadUrl, [string]$ContentType)
+        $file = Get-Item -LiteralPath $FilePath
+        $request = [System.Net.HttpWebRequest]::Create($UploadUrl)
+        $request.Method = "PUT"
+        $request.ContentType = $ContentType
+        $request.ContentLength = [int64]$file.Length
+        $request.AllowWriteStreamBuffering = $false
+        $request.Timeout = 300000
+        $request.ReadWriteTimeout = 300000
+        $buffer = New-Object byte[] (1024 * 1024)
+        $inputStream = $null
+        $requestStream = $null
+        $response = $null
+        try {
+          $inputStream = [System.IO.File]::OpenRead($FilePath)
+          $requestStream = $request.GetRequestStream()
+          $sent = [int64]0
+          $lastPercent = -1
+          while (($read = $inputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $requestStream.Write($buffer, 0, $read)
+            $sent += $read
+            $percentUpload = [int][math]::Floor(($sent * 100) / [math]::Max([int64]1, [int64]$file.Length))
+            if ($percentUpload -ne $lastPercent -and (($percentUpload % 5) -eq 0 -or $percentUpload -eq 100)) {
+              $lastPercent = $percentUpload
+              EnqProg (97 + [int][math]::Floor($percentUpload / 50)) ("Subiendo a nube: {0}%" -f $percentUpload)
+              EnqLog ("Subiendo a nube: {0}%" -f $percentUpload)
+            }
+          }
+          $requestStream.Flush()
+          $response = $request.GetResponse()
+          if ([int]$response.StatusCode -lt 200 -or [int]$response.StatusCode -gt 299) {
+            throw "HTTP $([int]$response.StatusCode) $($response.StatusDescription)"
+          }
+        } finally {
+          if ($response) { try { $response.Close() } catch {} }
+          if ($requestStream) { try { $requestStream.Dispose() } catch {} }
+          if ($inputStream) { try { $inputStream.Dispose() } catch {} }
+        }
+      }
       function Invoke-SqlQueryLite {
         param([string]$Server, [string]$Database, [string]$Query, [System.Management.Automation.PSCredential]$Credential, [scriptblock]$InfoMessageCallback)
         $connection = $null
@@ -3635,7 +3848,22 @@ function Show-BackupDialog {
           EnqLog "🗜️ Iniciando compresión ZIP..."
           $inputBak = $ScriptBackupPath
           $zipPath = "$ScriptBackupPath.zip"
-          if (-not (Test-Path $inputBak)) { EnqProg 0 "Error: no existe BAK"; EnqLog ("⚠️ No existe el BAK accesible: {0}" -f $inputBak); EnqLog "__DONE_ERR__"; return }
+          $bakReadable = $false
+          try {
+            $testStream = [System.IO.File]::OpenRead($inputBak)
+            $testStream.Dispose()
+            $bakReadable = $true
+          } catch {
+            $bakReadable = $false
+          }
+          if (-not $bakReadable) {
+            EnqProg 0 "Error: BAK no accesible desde esta PC"
+            EnqLog ("⚠️ No se puede leer el BAK para comprimir: {0}" -f $inputBak)
+            EnqLog "ℹ️ El backup sí se generó en el servidor SQL, pero esta estación no tiene acceso de lectura a esa ruta."
+            EnqLog "ℹ️ Opciones: (1) crea un share en el servidor apuntando a esa carpeta, (2) ejecuta dztools directamente en el servidor."
+            EnqLog "__DONE_WARN__"
+            return
+          }
           $sevenZip = Get-7ZipPath
           if (-not $sevenZip -or -not (Test-Path $sevenZip)) { EnqProg 0 "Error: no se encontró 7-Zip"; EnqLog "❌ No se encontró 7z.exe. No se puede comprimir."; EnqLog "__DONE_ERR__"; return }
           try {
@@ -3644,8 +3872,34 @@ function Show-BackupDialog {
             if ($ZipPassword -and $ZipPassword.Trim().Length -gt 0) { & $sevenZip a -tzip -p"$($ZipPassword.Trim())" -mem=AES256 $zipPath $inputBak | Out-Null } else { & $sevenZip a -tzip $zipPath $inputBak | Out-Null }
             EnqProg 97 "Finalizando compresión..."
             Start-Sleep -Milliseconds 300
-            if (Test-Path $zipPath) { $zipMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 2); EnqProg 99 "ZIP creado. Cerrando..."; EnqLog ("✅ ZIP creado ({0} MB): {1}" -f $zipMB, $zipPath) } else { EnqProg 0 "Error: ZIP no generado"; EnqLog ("❌ Se ejecutó 7-Zip pero NO se generó el ZIP: {0}" -f $zipPath) }
-          } catch { EnqProg 0 "Error al comprimir"; EnqLog ("❌ Error al comprimir: {0}" -f $_.Exception.Message) }
+            if (Test-Path $zipPath) {
+              $zipItem = Get-Item $zipPath
+              $zipMB = [math]::Round($zipItem.Length / 1MB, 2)
+              EnqProg 97 "ZIP creado."
+              EnqLog ("✅ ZIP creado ({0} MB): {1}" -f $zipMB, $zipPath)
+              if ($DoCloudUpload) {
+                if ([string]::IsNullOrWhiteSpace($CloudWorkerUrl) -or [string]::IsNullOrWhiteSpace($CloudToken)) {
+                  EnqProg 0 "Error: acceso nube no configurado"
+                  EnqLog "❌ Acceso nube no configurado. Guarda la URL del Worker y el token."
+                  EnqLog "__DONE_ERR__"
+                  return
+                }
+                EnqProg 97 "Solicitando URL de subida..."
+                EnqLog "☁ Solicitando URL de subida al Worker..."
+                $upload = Invoke-WorkerJson -Path "/v1/uploads" -Body @{ fileName = $zipItem.Name; size = [int64]$zipItem.Length; contentType = "application/zip" }
+                if (-not $upload.uploadUrl -or -not $upload.objectKey) { throw "El Worker no devolvió uploadUrl/objectKey." }
+                EnqProg 98 "Subiendo a nube..."
+                Send-FileToPresignedUrl -FilePath $zipPath -UploadUrl ([string]$upload.uploadUrl) -ContentType "application/zip"
+                EnqProg 99 "Obteniendo link de descarga..."
+                $download = Invoke-WorkerJson -Path "/v1/downloads" -Body @{ objectKey = [string]$upload.objectKey; ttlSeconds = 259200 }
+                if (-not $download.downloadUrl) { throw "El Worker no devolvió downloadUrl." }
+                EnqLog ("✅ Link de descarga (vence según TTL/lifecycle): {0}" -f $download.downloadUrl)
+                EnqLog ("__CLOUD_LINK__{0}" -f $download.downloadUrl)
+              } else {
+                EnqProg 99 "ZIP creado. Cerrando..."
+              }
+            } else { EnqProg 0 "Error: ZIP no generado"; EnqLog ("❌ Se ejecutó 7-Zip pero NO se generó el ZIP: {0}" -f $zipPath) }
+          } catch { EnqProg 0 "Error al comprimir/subir"; EnqLog ("❌ Error al comprimir o subir: {0}" -f $_.Exception.Message) }
         }
         if ($DoCompress) {
           EnqLog "__DONE_OK__"
@@ -3665,7 +3919,7 @@ function Show-BackupDialog {
     $rs.Open()
     $ps = [PowerShell]::Create()
     $ps.Runspace = $rs
-    [void]$ps.AddScript($worker).AddArgument($Server).AddArgument($Database).AddArgument($BackupQuery).AddArgument($ScriptBackupPath).AddArgument($DoCompress).AddArgument($ZipPassword).AddArgument($Credential).AddArgument($LogQueue).AddArgument($ProgressQueue)
+    [void]$ps.AddScript($worker).AddArgument($Server).AddArgument($Database).AddArgument($BackupQuery).AddArgument($ScriptBackupPath).AddArgument($DoCompress).AddArgument($ZipPassword).AddArgument($Credential).AddArgument($DoCloudUpload).AddArgument($CloudWorkerUrl).AddArgument($CloudToken).AddArgument($LogQueue).AddArgument($ProgressQueue)
     $null = $ps.BeginInvoke()
     Write-DzDebug "`t[DEBUG][Start-BackupWorkAsync] Worker lanzado"
   }
@@ -3678,11 +3932,10 @@ function Show-BackupDialog {
       try {
         $count = 0
         $doneThisTick = $false
-        $prependBuffer = New-Object System.Text.StringBuilder
+        $appendBuffer = New-Object System.Text.StringBuilder
         while ($count -lt 50) {
           $line = $null
           if (-not $logQueue.TryDequeue([ref]$line)) { break }
-          [void]$prependBuffer.AppendLine($line)
           if ($line -like "*__DONE_OK__*" -or $line -like "*__DONE_WARN__*" -or $line -like "*__DONE_ERR__*") {
             if ($line -like "*__DONE_OK__*") { $script:LastDoneStatus = "OK" }
             elseif ($line -like "*__DONE_WARN__*") { $script:LastDoneStatus = "WARN" }
@@ -3714,17 +3967,30 @@ function Show-BackupDialog {
                 Ui-Error "Ocurrió un error durante el respaldo. Revisa el log." "Error" $window
               }
             }
+          } elseif ($line -like "*__CLOUD_LINK__*") {
+            $cloudLink = $line -replace '^.*__CLOUD_LINK__', ''
+            try {
+              if (Get-Command Set-ClipboardTextSafe -ErrorAction SilentlyContinue) {
+                Set-ClipboardTextSafe -Text $cloudLink -Owner $window | Out-Null
+              } else {
+                [System.Windows.Clipboard]::SetText($cloudLink)
+              }
+            } catch {
+              Write-DzDebug "`t[DEBUG][CloudUpload] No se pudo copiar link: $($_.Exception.Message)"
+            }
+          } else {
+            [void]$appendBuffer.AppendLine($line)
           }
           $count++
         }
         if ($count -gt 0) {
-          $newText = $prependBuffer.ToString()
+          $newText = $appendBuffer.ToString()
           if ($newText.Length -gt 0) {
-            $txtLog.Text = $newText + $txtLog.Text
+            $txtLog.AppendText($newText)
             if ($txtLog.Text.Length -gt $script:LogMaxChars) {
-              $txtLog.Text = $txtLog.Text.Substring(0, $script:LogMaxChars)
+              $txtLog.Text = $txtLog.Text.Substring($txtLog.Text.Length - $script:LogMaxChars)
             }
-            $txtLog.ScrollToLine(0)  # siempre arriba
+            $txtLog.ScrollToEnd()
           }
         }
 
@@ -3769,6 +4035,7 @@ Si solo necesitas crear el respaldo básico (.BAK), NO es necesario instalarlo.
         }
         $txtPassword.IsEnabled = $true
         $lblPassword.IsEnabled = $true
+        Update-CloudUploadUI
       } catch {
         Write-DzDebug "`t[DEBUG][UI] Error chkComprimir CHECKED: $($_.Exception.Message)"
         Ui-Error "Error validando requisitos de compresión: $($_.Exception.Message)" "Error" $window
@@ -3776,6 +4043,18 @@ Si solo necesitas crear el respaldo básico (.BAK), NO es necesario instalarlo.
       }
     })
   $credential = New-SafeCredential -Username $User -PlainPassword $Password
+  $btnConfigurarNube.Add_Click({
+      try {
+        $saved = Show-R2CloudConfigDialog -Owner $window
+        if ($saved) {
+          Update-CloudUploadUI
+          Add-Log "☁ URL nube configurada. El secret se capturará en cada respaldo."
+        }
+      } catch {
+        Write-DzDebug "`t[DEBUG][UI] Error configurando nube: $($_.Exception.Message)"
+        Ui-Error "Error configurando acceso nube: $($_.Exception.Message)" "Error" $window
+      }
+    })
   $btnBrowseServerBackupFolder.Add_Click({
       Write-DzDebug "`t[DEBUG][UI] btnBrowseServerBackupFolder Click"
       try {
@@ -3795,7 +4074,24 @@ Si solo necesitas crear el respaldo básico (.BAK), NO es necesario instalarlo.
         Ui-Error "Error al abrir explorador de carpetas en servidor: $($_.Exception.Message)" "Error" $window
       }
     })
-  $chkComprimir.Add_Unchecked({ Write-DzDebug "`t[DEBUG][UI] chkComprimir UNCHECKED"; Disable-CompressionUI })
+  $chkComprimir.Add_Unchecked({ Write-DzDebug "`t[DEBUG][UI] chkComprimir UNCHECKED"; Disable-CompressionUI; Update-CloudUploadUI })
+  $chkSubir.Add_Checked({
+      if ($chkComprimir.IsChecked -ne $true) {
+        Ui-Warn "La subida a nube requiere comprimir el respaldo primero." "Compresión requerida" $window
+        $chkSubir.IsChecked = $false
+        return
+      }
+      if (-not (Test-R2CloudConfigured)) {
+        Ui-Warn "Configura la URL del Worker antes de subir a nube." "Acceso nube requerido" $window
+        $chkSubir.IsChecked = $false
+        Update-CloudUploadUI
+        return
+      }
+      $pwdCloudSecret.IsEnabled = $true
+      $pwdCloudSecret.Password = ""
+      $pwdCloudSecret.Focus() | Out-Null
+    })
+  $chkSubir.Add_Unchecked({ $pwdCloudSecret.Password = ""; Update-CloudUploadUI })
   $btnAceptar.Add_Click({
       if ($script:BackupRunning) { return }
       $script:DonePopupShown = $false
@@ -3817,7 +4113,27 @@ Si solo necesitas crear el respaldo básico (.BAK), NO es necesario instalarlo.
         }
         $pbBackup.Value = 0
         $txtProgress.Text = "Esperando..."
+        $cloudUpload = ($chkSubir.IsChecked -eq $true)
+        if ($cloudUpload -and $chkComprimir.IsChecked -ne $true) {
+          Ui-Warn "La subida a nube solo está disponible para respaldos comprimidos." "Compresión requerida" $window
+          Reset-BackupUI -ProgressText "Configura compresión"
+          return
+        }
+        if ($cloudUpload -and -not (Test-R2CloudConfigured)) {
+          Ui-Warn "Configura la URL del Worker antes de subir a nube." "Acceso nube requerido" $window
+          Reset-BackupUI -ProgressText "Configura acceso nube"
+          return
+        }
+        if ($cloudUpload -and [string]::IsNullOrWhiteSpace([string]$pwdCloudSecret.Password)) {
+          Ui-Warn "Captura el secret de nube para este respaldo. No se guardará." "Secret requerido" $window
+          Reset-BackupUI -ProgressText "Captura secret nube"
+          return
+        }
+        $cloudWorkerUrl = if ($cloudUpload) { Get-R2WorkerUrl } else { "" }
+        $cloudToken = if ($cloudUpload) { [string]$pwdCloudSecret.Password } else { "" }
         Add-Log "Iniciando proceso de backup..."
+        if ($cloudUpload) { Add-Log "☁ Subida a nube habilitada." }
+        Set-BackupOptionsExpanded -Expanded $false
         $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
         $timer = [System.Windows.Threading.DispatcherTimer]::new()
         $timer.Interval = [TimeSpan]::FromSeconds(1)
@@ -3833,12 +4149,16 @@ Si solo necesitas crear el respaldo básico (.BAK), NO es necesario instalarlo.
           $sqlBackupFolder = $defaultBackupPath
           $txtServerBackupFolder.Text = $defaultBackupPath
         }
+        if (-not $backupFileName.ToLower().EndsWith(".bak")) { $backupFileName = "$backupFileName.bak"; $txtNombre.Text = $backupFileName }
         $sqlBackupPath = Join-Path $sqlBackupFolder $backupFileName
+        $remoteAccess = $null
         if ($sameHost) {
+          $scriptBackupFolder = $sqlBackupFolder
           $scriptBackupPath = $sqlBackupPath
         } else {
-          $folderPart = $sqlBackupFolder -replace '^[A-Za-z]:', ''  # Quitar la letra de unidad
-          $scriptBackupPath = "\\$machineName\$($sqlBackupFolder[0])$`$$folderPart\$backupFileName"
+          $remoteAccess = Get-RemoteBackupAccessInfo -MachineName $machineName -SqlBackupFolder $sqlBackupFolder
+          $scriptBackupFolder = $remoteAccess.Folder
+          $scriptBackupPath = Join-Path $scriptBackupFolder $backupFileName
         }
         Add-Log "Servidor: $Server"
         Add-Log "Base de datos: $Database"
@@ -3846,9 +4166,44 @@ Si solo necesitas crear el respaldo básico (.BAK), NO es necesario instalarlo.
         Add-Log "Carpeta de respaldo: $sqlBackupFolder"
         Add-Log "Ruta SQL (donde escribe el motor): $sqlBackupPath"
         Add-Log "Ruta accesible desde esta PC: $scriptBackupPath"
-        if (-not $backupFileName.ToLower().EndsWith(".bak")) { $backupFileName = "$backupFileName.bak"; $txtNombre.Text = $backupFileName }
         $invalid = [System.IO.Path]::GetInvalidFileNameChars()
         if ($backupFileName.IndexOfAny($invalid) -ge 0) { Show-WarnDialog -Message "El nombre contiene caracteres no válidos..." -Title "Nombre inválido" -Owner $window; Reset-BackupUI -ProgressText "Nombre inválido"; return }
+        if (-not $sameHost -and $remoteAccess) {
+          if ($remoteAccess.IsAccessible) {
+            if ($remoteAccess.Kind -eq "share") {
+              Add-Log "✓ Usando share accesible desde esta PC: $($remoteAccess.Folder)"
+            } else {
+              Add-Log "✓ Usando admin share (C$) accesible desde esta PC: $($remoteAccess.Folder)"
+              Add-Log "ℹ️ Nota: el admin share puede responder a Test-Path pero fallar en lectura real desde el runspace de backup."
+            }
+            if ($chkComprimir.IsChecked -eq $true) {
+              $probeFolder = $remoteAccess.Folder
+              $probeOk = $false
+              try {
+                $null = Get-ChildItem -Path $probeFolder -ErrorAction Stop
+                $probeOk = $true
+              } catch {
+                $probeOk = $false
+              }
+              if (-not $probeOk) {
+                $shareHint = if ($remoteAccess.SharedFolder) { $remoteAccess.SharedFolder } else { "\\$machineName\SQLBackups" }
+                Ui-Warn "La ruta remota responde a Test-Path pero no permite listar archivos desde esta sesión.`n`nEl backup se generará en el servidor, pero esta estación no podrá leerlo para comprimir.`n`nOpciones:`n• Crea un share en el servidor apuntando a:`n  $sqlBackupFolder`n• Acceso sugerido desde esta PC:`n  $shareHint`n• O ejecuta dztools directamente en el servidor." "Acceso de lectura insuficiente" $window
+                Reset-BackupUI -ProgressText "Acceso de lectura insuficiente en ruta remota"
+                return
+              }
+            }
+          } else {
+            Add-Log "⚠️ No pude leer la carpeta remota desde esta PC."
+            Add-Log "   Probé: $($remoteAccess.AdminFolder)"
+            if ($remoteAccess.SharedFolder) { Add-Log "   También probé: $($remoteAccess.SharedFolder)" }
+            if ($chkComprimir.IsChecked -eq $true) {
+              $shareHint = if ($remoteAccess.SharedFolder) { $remoteAccess.SharedFolder } else { "\\$machineName\SQLBackups" }
+              Ui-Warn "El backup se genera en el servidor, pero esta estación no puede leerlo para comprimir/subir.`n`nCrea un recurso compartido en el servidor apuntando a:`n$sqlBackupFolder`n`nNombre sugerido del share:`n$(Split-Path -Path $sqlBackupFolder -Leaf)`n`nDebe quedar accesible desde esta estación como:`n$shareHint`n`nO ejecuta dztools directamente en el servidor." "Ruta remota no accesible" $window
+              Reset-BackupUI -ProgressText "Ruta remota no accesible"
+              return
+            }
+          }
+        }
         $scriptBackupExists = $false
         try {
           $scriptBackupExists = Test-Path $scriptBackupPath -ErrorAction Stop
@@ -3865,14 +4220,8 @@ Si solo necesitas crear el respaldo básico (.BAK), NO es necesario instalarlo.
             Add-Log "✓ Carpeta creada: $sqlBackupFolder"
           }
         } else {
-          $uncFolder = "\\$machineName\$($sqlBackupFolder[0])$`$" + ($sqlBackupFolder -replace '^[A-Za-z]:', '')
-          try {
-            if (-not (Test-Path $uncFolder -ErrorAction Stop)) {
-              Add-Log "⚠️ No pude validar la carpeta UNC: $uncFolder (puede ser permisos). SQL intentará escribir en $sqlBackupFolder en el servidor."
-            }
-          } catch {
-            Write-DzDebug "`t[DEBUG][UI] No se pudo validar la carpeta UNC: $uncFolder. $($_.Exception.Message)"
-            Add-Log "⚠️ No pude validar la carpeta UNC: $uncFolder (puede ser permisos). SQL intentará escribir en $sqlBackupFolder en el servidor."
+          if ($remoteAccess -and -not $remoteAccess.IsAccessible) {
+            Add-Log "⚠️ SQL intentará escribir en $sqlBackupFolder en el servidor. Esta PC no podrá leerlo sin share/permisos."
           }
         }
         Add-Log "✓ Credenciales listas"
@@ -3883,7 +4232,8 @@ WITH CHECKSUM, STATS = 1, FORMAT, INIT
 "@
         Paint-Progress -Percent 5 -Message "Conectando a SQL Server..."
         Write-DzDebug "`t[DEBUG][UI] Llamando Start-BackupWorkAsync"
-        Start-BackupWorkAsync -Server $Server -Database $Database -BackupQuery $backupQuery -ScriptBackupPath $scriptBackupPath -DoCompress ($chkComprimir.IsChecked -eq $true) -ZipPassword $txtPassword.Password -Credential $credential -LogQueue $logQueue -ProgressQueue $progressQueue
+        Start-BackupWorkAsync -Server $Server -Database $Database -BackupQuery $backupQuery -ScriptBackupPath $scriptBackupPath -DoCompress ($chkComprimir.IsChecked -eq $true) -ZipPassword $txtPassword.Password -Credential $credential -DoCloudUpload $cloudUpload -CloudWorkerUrl $cloudWorkerUrl -CloudToken $cloudToken -LogQueue $logQueue -ProgressQueue $progressQueue
+        $pwdCloudSecret.Password = ""
       } catch {
         Write-DzDebug "`t[DEBUG][UI] ERROR btnAceptar: $($_.Exception.Message)"
         Add-Log "❌ Error: $($_.Exception.Message)"
@@ -3902,8 +4252,12 @@ WITH CHECKSUM, STATS = 1, FORMAT, INIT
       if ([string]::IsNullOrWhiteSpace($sqlBackupFolder)) {
         $sqlBackupFolder = $defaultBackupPath
       }
-      $folderPart = $sqlBackupFolder -replace '^[A-Za-z]:', ''
-      $backupFolder = "\\$machineName\$($sqlBackupFolder[0])$`$$folderPart"
+      if ($env:COMPUTERNAME -ieq $machineName) {
+        $backupFolder = $sqlBackupFolder
+      } else {
+        $remoteAccess = Get-RemoteBackupAccessInfo -MachineName $machineName -SqlBackupFolder $sqlBackupFolder
+        $backupFolder = $remoteAccess.Folder
+      }
       if (Test-Path $backupFolder) {
         Start-Process explorer.exe $backupFolder
       } else {

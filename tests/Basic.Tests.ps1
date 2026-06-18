@@ -82,4 +82,45 @@ Describe "Pruebas básicas del proyecto" {
             $matches | Should -BeNullOrEmpty
         }
     }
+
+    Context "Reparación de base de datos" {
+        BeforeAll {
+            $script:SqlOpsPath = Join-Path $script:ModulesPath "SqlOps.psm1"
+            $script:SqlOpsContent = Get-Content $script:SqlOpsPath -Raw
+        }
+
+        It "Debe limitar los pasos administrativos de reparación" {
+            $script:SqlOpsContent.IndexOf('$adminTimeoutSeconds = 60') | Should -BeGreaterThan -1
+            $script:SqlOpsContent | Should -Match 'CommandTimeoutSeconds\s+\$adminTimeoutSeconds\s+-StepName "cerrar conexiones existentes"'
+            $script:SqlOpsContent | Should -Match 'CommandTimeoutSeconds\s+\$adminTimeoutSeconds\s+-StepName "configurar modo EMERGENCY"'
+            $script:SqlOpsContent | Should -Match 'CommandTimeoutSeconds\s+\$adminTimeoutSeconds\s+-StepName "restaurar modo MULTI_USER"'
+        }
+
+        It "Debe dejar DBCC CHECKDB sin timeout automatico" {
+            $script:SqlOpsContent | Should -Match 'CommandTimeoutSeconds\s+0\s+-StepName "ejecutar DBCC CHECKDB \(\$RepairOption\)"'
+        }
+
+        It "Debe usar SINGLE_USER automaticamente para reparar" {
+            $script:SqlOpsContent.IndexOf('$requiresSingleUser = $RepairOption -ne "CHECK"') | Should -BeGreaterThan -1
+            $script:SqlOpsContent.IndexOf('$useSingleUser = $CloseConnections -or $requiresSingleUser') | Should -BeGreaterThan -1
+        }
+
+        It "Debe reservar EMERGENCY para REPAIR_ALLOW_DATA_LOSS" {
+            $script:SqlOpsContent.IndexOf('$useEmergency = $EmergencyMode -and $RepairOption -eq "REPAIR_ALLOW_DATA_LOSS"') | Should -BeGreaterThan -1
+            $script:SqlOpsContent | Should -Match 'SQL Server solo permite reparar en EMERGENCY con REPAIR_ALLOW_DATA_LOSS'
+        }
+
+        It "Debe cerrar conexiones antes de configurar EMERGENCY" {
+            $singleUserIndex = $script:SqlOpsContent.IndexOf('$closeQuery = "ALTER DATABASE [$safeName] SET SINGLE_USER WITH ROLLBACK IMMEDIATE"')
+            $emergencyIndex = $script:SqlOpsContent.IndexOf('$emergencyQuery = "ALTER DATABASE [$safeName] SET EMERGENCY"')
+
+            $singleUserIndex | Should -BeGreaterThan -1
+            $emergencyIndex | Should -BeGreaterThan -1
+            $singleUserIndex | Should -BeLessThan $emergencyIndex
+        }
+
+        It "No debe mostrar marcadores internos en el log visible" {
+            $script:SqlOpsContent | Should -Match '\(SUCCESS_RESULT\|ERROR_RESULT\|__DONE__\)'
+        }
+    }
 }
