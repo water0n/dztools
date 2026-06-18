@@ -3417,7 +3417,6 @@ function Show-BackupDialog {
                   <RowDefinition Height="Auto"/>
                   <RowDefinition Height="Auto"/>
                   <RowDefinition Height="Auto"/>
-                  <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <CheckBox x:Name="chkComprimir" Grid.Row="0" Style="{StaticResource CheckBoxStyle}">
                   <TextBlock Text="Comprimir (requiere Chocolatey + 7-Zip)" FontWeight="SemiBold"/>
@@ -3431,11 +3430,10 @@ function Show-BackupDialog {
                   <PasswordBox x:Name="txtPassword" Grid.Column="0" Style="{StaticResource PasswordBoxStyle}"/>
                   <Button x:Name="btnTogglePassword" Grid.Column="1" Content="👁" Width="34" Height="34" Margin="8,0,0,0" Style="{StaticResource SecondaryButtonStyle}"/>
                 </Grid>
-                <CheckBox x:Name="chkSubir" Grid.Row="3" Style="{StaticResource CheckBoxStyle}" Margin="0,10,0,0" IsChecked="False" ToolTip="Requiere compresión y acceso nube configurado">
+                <CheckBox x:Name="chkSubir" Grid.Row="3" Style="{StaticResource CheckBoxStyle}" Margin="0,10,0,0" IsChecked="False" ToolTip="Requiere compresión; el secret se captura manualmente.">
                   <TextBlock Text="Subir a nube (R2)" FontWeight="SemiBold"/>
                 </CheckBox>
                 <PasswordBox x:Name="pwdCloudSecret" Grid.Row="4" Style="{StaticResource PasswordBoxStyle}" Margin="0,4,0,0" ToolTip="Secret/token de nube. No se guarda; debes capturarlo cada vez."/>
-                <Button x:Name="btnConfigurarNube" Grid.Row="5" Content="Configurar URL nube" Style="{StaticResource SecondaryButtonStyle}" Width="170" HorizontalAlignment="Left" Margin="0,6,0,0"/>
               </Grid>
             </Grid>
           </Grid>
@@ -3463,18 +3461,54 @@ function Show-BackupDialog {
             <Grid.RowDefinitions>
               <RowDefinition Height="Auto"/>
               <RowDefinition Height="*"/>
+              <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
             <TextBlock Grid.Row="0" Text="Log" Style="{StaticResource CardTitleStyle}"/>
             <TextBox x:Name="txtLog" Grid.Row="1"
                      IsReadOnly="True"
                      VerticalScrollBarVisibility="Auto"
-                     HorizontalScrollBarVisibility="Auto"
-                     TextWrapping="NoWrap"
+                     HorizontalScrollBarVisibility="Disabled"
+                     TextWrapping="Wrap"
                      Background="{DynamicResource PanelBg}"
                      Foreground="{DynamicResource PanelFg}"
                      BorderBrush="{DynamicResource BorderBrushColor}"
                      BorderThickness="1"
                      Padding="10"/>
+            <Grid x:Name="pnlCloudLink" Grid.Row="2" Visibility="Collapsed" Margin="0,8,0,0">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBox x:Name="txtCloudLink"
+                       Grid.Column="0"
+                       IsReadOnly="True"
+                       Height="30"
+                       VerticalContentAlignment="Center"
+                       HorizontalScrollBarVisibility="Disabled"
+                       VerticalScrollBarVisibility="Disabled"
+                       TextWrapping="NoWrap"
+                       Background="{DynamicResource PanelBg}"
+                       Foreground="{DynamicResource PanelFg}"
+                       BorderBrush="{DynamicResource BorderBrushColor}"
+                       BorderThickness="1"
+                       Padding="8,3"
+                       ToolTip="Link de descarga. Ya fue copiado al portapapeles."/>
+              <Button x:Name="btnAbrirLink"
+                      Grid.Column="1"
+                      Content="Abrir link"
+                      Style="{StaticResource SecondaryButtonStyle}"
+                      Width="105"
+                      Height="30"
+                      Margin="8,0,0,0"/>
+              <Button x:Name="btnCopiarLink"
+                      Grid.Column="2"
+                      Content="Copiar"
+                      Style="{StaticResource SecondaryButtonStyle}"
+                      Width="80"
+                      Height="30"
+                      Margin="8,0,0,0"/>
+            </Grid>
           </Grid>
         </Border>
       </Grid>
@@ -3535,13 +3569,16 @@ function Show-BackupDialog {
   $pbBackup = Get-Ctrl "pbBackup"
   $txtProgress = Get-Ctrl "txtProgress"
   $txtLog = Get-Ctrl "txtLog"
+  $pnlCloudLink = Get-Ctrl "pnlCloudLink"
+  $txtCloudLink = Get-Ctrl "txtCloudLink"
+  $btnAbrirLink = Get-Ctrl "btnAbrirLink"
+  $btnCopiarLink = Get-Ctrl "btnCopiarLink"
   $btnAceptar = Get-Ctrl "btnAceptar"
   $btnAbrirCarpeta = Get-Ctrl "btnAbrirCarpeta"
   $btnCerrar = Get-Ctrl "btnCerrar"
   $btnTogglePassword = Get-Ctrl "btnTogglePassword"
   $btnToggleOptions = Get-Ctrl "btnToggleOptions"
   $pnlBackupOptionsBody = Get-Ctrl "pnlBackupOptionsBody"
-  $btnConfigurarNube = Get-Ctrl "btnConfigurarNube"
   $headerBar = Get-Ctrl "HeaderBar"
   $btnClose = Get-Ctrl "btnClose"
   if ($txtServerBackupFolder) {
@@ -3549,7 +3586,7 @@ function Show-BackupDialog {
     Write-DzDebug "`t[DEBUG][Show-BackupDialog] Carpeta por omisión establecida: $defaultBackupPath"
   }
 
-  Write-DzDebug "`t[DEBUG][Show-BackupDialog] Controles: chkRespaldo=$([bool]$chkRespaldo) txtNombre=$([bool]$txtNombre) chkComprimir=$([bool]$chkComprimir) txtPassword=$([bool]$txtPassword) lblPassword=$([bool]$lblPassword) chkSubir=$([bool]$chkSubir) pwdCloudSecret=$([bool]$pwdCloudSecret) btnConfigurarNube=$([bool]$btnConfigurarNube) btnToggleOptions=$([bool]$btnToggleOptions) pnlBackupOptionsBody=$([bool]$pnlBackupOptionsBody) pbBackup=$([bool]$pbBackup) txtProgress=$([bool]$txtProgress) txtLog=$([bool]$txtLog) btnAceptar=$([bool]$btnAceptar) btnAbrirCarpeta=$([bool]$btnAbrirCarpeta) btnCerrar=$([bool]$btnCerrar) btnTogglePassword=$([bool]$btnTogglePassword)"
+  Write-DzDebug "`t[DEBUG][Show-BackupDialog] Controles: chkRespaldo=$([bool]$chkRespaldo) txtNombre=$([bool]$txtNombre) chkComprimir=$([bool]$chkComprimir) txtPassword=$([bool]$txtPassword) lblPassword=$([bool]$lblPassword) chkSubir=$([bool]$chkSubir) pwdCloudSecret=$([bool]$pwdCloudSecret) btnToggleOptions=$([bool]$btnToggleOptions) pnlBackupOptionsBody=$([bool]$pnlBackupOptionsBody) pbBackup=$([bool]$pbBackup) txtProgress=$([bool]$txtProgress) txtLog=$([bool]$txtLog) pnlCloudLink=$([bool]$pnlCloudLink) txtCloudLink=$([bool]$txtCloudLink) btnAbrirLink=$([bool]$btnAbrirLink) btnCopiarLink=$([bool]$btnCopiarLink) btnAceptar=$([bool]$btnAceptar) btnAbrirCarpeta=$([bool]$btnAbrirCarpeta) btnCerrar=$([bool]$btnCerrar) btnTogglePassword=$([bool]$btnTogglePassword)"
   $window.WindowStartupLocation = "Manual"
   $window.Add_Loaded({
       try {
@@ -3606,7 +3643,7 @@ function Show-BackupDialog {
         Safe-CloseWindow -Window $window -Result $false
       }
     })
-  if (-not $txtNombre -or -not $txtServerBackupFolder -or -not $btnBrowseServerBackupFolder -or -not $chkComprimir -or -not $txtPassword -or -not $lblPassword -or -not $chkSubir -or -not $pwdCloudSecret -or -not $btnConfigurarNube -or -not $btnToggleOptions -or -not $pnlBackupOptionsBody -or -not $pbBackup -or -not $txtProgress -or -not $txtLog -or -not $btnAceptar -or -not $btnAbrirCarpeta -or -not $btnCerrar) {
+  if (-not $txtNombre -or -not $txtServerBackupFolder -or -not $btnBrowseServerBackupFolder -or -not $chkComprimir -or -not $txtPassword -or -not $lblPassword -or -not $chkSubir -or -not $pwdCloudSecret -or -not $btnToggleOptions -or -not $pnlBackupOptionsBody -or -not $pbBackup -or -not $txtProgress -or -not $txtLog -or -not $pnlCloudLink -or -not $txtCloudLink -or -not $btnAbrirLink -or -not $btnCopiarLink -or -not $btnAceptar -or -not $btnAbrirCarpeta -or -not $btnCerrar) {
     Write-DzDebug "`t[DEBUG][Show-BackupDialog] ERROR: uno o más controles son NULL. Cerrando..."
     throw "Controles WPF incompletos (FindName devolvió NULL)."
   }
@@ -3631,15 +3668,13 @@ function Show-BackupDialog {
       Set-BackupOptionsExpanded -Expanded (-not $script:BackupOptionsExpanded)
     })
   function Update-CloudUploadUI {
-    $cloudReady = $false
-    try { $cloudReady = Test-R2CloudConfigured } catch { $cloudReady = $false }
-    $chkSubir.IsEnabled = ($chkComprimir.IsChecked -eq $true) -and $cloudReady
+    $chkSubir.IsEnabled = ($chkComprimir.IsChecked -eq $true)
     $pwdCloudSecret.IsEnabled = ($chkSubir.IsChecked -eq $true) -and $chkSubir.IsEnabled
     if (-not $chkSubir.IsEnabled) { $chkSubir.IsChecked = $false; $pwdCloudSecret.Password = "" }
-    if ($cloudReady) {
+    if ($chkSubir.IsEnabled) {
       $chkSubir.ToolTip = "Subirá el ZIP comprimido a Cloudflare R2. Debes capturar el secret cada vez."
     } else {
-      $chkSubir.ToolTip = "Configura la URL del Worker primero"
+      $chkSubir.ToolTip = "Requiere comprimir el respaldo primero."
     }
   }
   Update-CloudUploadUI
@@ -3650,8 +3685,43 @@ function Show-BackupDialog {
   $script:LastDoneStatus = $null
   function Paint-Progress { param([int]$Percent, [string]$Message) $pbBackup.Value = $Percent; $txtProgress.Text = $Message }
   function Add-Log { param([string]$Message) $logQueue.Enqueue(("{0} {1}" -f (Get-Date -Format 'HH:mm:ss'), $Message)) }
+  function Copy-CloudLink {
+    param([string]$Link)
+    if ([string]::IsNullOrWhiteSpace($Link)) { return $false }
+    try {
+      if (Get-Command Set-ClipboardTextSafe -ErrorAction SilentlyContinue) {
+        Set-ClipboardTextSafe -Text $Link -Owner $window | Out-Null
+      } else {
+        [System.Windows.Clipboard]::SetText($Link)
+      }
+      return $true
+    } catch {
+      Write-DzDebug "`t[DEBUG][CloudUpload] No se pudo copiar link: $($_.Exception.Message)"
+      return $false
+    }
+  }
+  function Open-CloudLink {
+    param([string]$Link)
+    if ([string]::IsNullOrWhiteSpace($Link)) { return }
+    try {
+      $psi = New-Object System.Diagnostics.ProcessStartInfo
+      $psi.FileName = $Link
+      $psi.UseShellExecute = $true
+      [System.Diagnostics.Process]::Start($psi) | Out-Null
+    } catch {
+      Write-DzDebug "`t[DEBUG][CloudUpload] No se pudo abrir link: $($_.Exception.Message)"
+      Ui-Error "No se pudo abrir el link: $($_.Exception.Message)" "Error" $window
+    }
+  }
   function Disable-CompressionUI { $chkComprimir.IsChecked = $false; $txtPassword.IsEnabled = $false; $lblPassword.IsEnabled = $false; $txtPassword.Password = "" }
   function New-SafeCredential { param([string]$Username, [string]$PlainPassword) $secure = New-Object System.Security.SecureString; foreach ($ch in $PlainPassword.ToCharArray()) { $secure.AppendChar($ch) }; $secure.MakeReadOnly(); New-Object System.Management.Automation.PSCredential($Username, $secure) }
+  $btnCopiarLink.Add_Click({
+      $link = ([string]$txtCloudLink.Text).Trim()
+      if (Copy-CloudLink -Link $link) { $txtProgress.Text = "Link copiado al portapapeles." }
+    })
+  $btnAbrirLink.Add_Click({
+      Open-CloudLink -Link ([string]$txtCloudLink.Text).Trim()
+    })
   function Get-RemoteBackupAccessInfo {
     param(
       [Parameter(Mandatory = $true)][string]$MachineName,
@@ -3710,6 +3780,7 @@ function Show-BackupDialog {
       param($Server, $Database, $BackupQuery, $ScriptBackupPath, $DoCompress, $ZipPassword, $Credential, $DoCloudUpload, $CloudWorkerUrl, $CloudToken, $LogQueue, $ProgressQueue)
       function EnqLog([string]$m) { $LogQueue.Enqueue(("{0} {1}" -f (Get-Date -Format 'HH:mm:ss'), $m)) }
       function EnqProg([int]$p, [string]$m) { $ProgressQueue.Enqueue(@{Percent = $p; Message = $m }) }
+      function EnqSep { EnqLog "=======================================" }
       function Invoke-WorkerJson {
         param([string]$Path, [hashtable]$Body)
         $uri = "{0}{1}" -f $CloudWorkerUrl.TrimEnd('/'), $Path
@@ -3843,6 +3914,7 @@ function Show-BackupDialog {
           EnqLog ("⚠️ No se encontró el archivo en: {0}" -f $ScriptBackupPath)
           EnqLog ("ℹ️ Nota: Si es servidor remoto, puede ser permisos/UNC. El backup pudo haberse generado en el servidor.")
         }
+        EnqSep
         if ($DoCompress) {
           EnqProg 90 "Backup listo. Preparando compresión..."
           EnqLog "🗜️ Iniciando compresión ZIP..."
@@ -3877,10 +3949,11 @@ function Show-BackupDialog {
               $zipMB = [math]::Round($zipItem.Length / 1MB, 2)
               EnqProg 97 "ZIP creado."
               EnqLog ("✅ ZIP creado ({0} MB): {1}" -f $zipMB, $zipPath)
+              EnqSep
               if ($DoCloudUpload) {
                 if ([string]::IsNullOrWhiteSpace($CloudWorkerUrl) -or [string]::IsNullOrWhiteSpace($CloudToken)) {
                   EnqProg 0 "Error: acceso nube no configurado"
-                  EnqLog "❌ Acceso nube no configurado. Guarda la URL del Worker y el token."
+                  EnqLog "❌ Acceso nube no configurado. Captura el secret/token de nube."
                   EnqLog "__DONE_ERR__"
                   return
                 }
@@ -3969,12 +4042,12 @@ function Show-BackupDialog {
             }
           } elseif ($line -like "*__CLOUD_LINK__*") {
             $cloudLink = $line -replace '^.*__CLOUD_LINK__', ''
+            $cloudLink = $cloudLink.Trim()
+            $txtCloudLink.Text = $cloudLink
+            $pnlCloudLink.Visibility = [System.Windows.Visibility]::Visible
+            $txtCloudLink.ScrollToHome()
             try {
-              if (Get-Command Set-ClipboardTextSafe -ErrorAction SilentlyContinue) {
-                Set-ClipboardTextSafe -Text $cloudLink -Owner $window | Out-Null
-              } else {
-                [System.Windows.Clipboard]::SetText($cloudLink)
-              }
+              [void](Copy-CloudLink -Link $cloudLink)
             } catch {
               Write-DzDebug "`t[DEBUG][CloudUpload] No se pudo copiar link: $($_.Exception.Message)"
             }
@@ -4043,18 +4116,6 @@ Si solo necesitas crear el respaldo básico (.BAK), NO es necesario instalarlo.
       }
     })
   $credential = New-SafeCredential -Username $User -PlainPassword $Password
-  $btnConfigurarNube.Add_Click({
-      try {
-        $saved = Show-R2CloudConfigDialog -Owner $window
-        if ($saved) {
-          Update-CloudUploadUI
-          Add-Log "☁ URL nube configurada. El secret se capturará en cada respaldo."
-        }
-      } catch {
-        Write-DzDebug "`t[DEBUG][UI] Error configurando nube: $($_.Exception.Message)"
-        Ui-Error "Error configurando acceso nube: $($_.Exception.Message)" "Error" $window
-      }
-    })
   $btnBrowseServerBackupFolder.Add_Click({
       Write-DzDebug "`t[DEBUG][UI] btnBrowseServerBackupFolder Click"
       try {
@@ -4079,12 +4140,6 @@ Si solo necesitas crear el respaldo básico (.BAK), NO es necesario instalarlo.
       if ($chkComprimir.IsChecked -ne $true) {
         Ui-Warn "La subida a nube requiere comprimir el respaldo primero." "Compresión requerida" $window
         $chkSubir.IsChecked = $false
-        return
-      }
-      if (-not (Test-R2CloudConfigured)) {
-        Ui-Warn "Configura la URL del Worker antes de subir a nube." "Acceso nube requerido" $window
-        $chkSubir.IsChecked = $false
-        Update-CloudUploadUI
         return
       }
       $pwdCloudSecret.IsEnabled = $true
@@ -4113,15 +4168,12 @@ Si solo necesitas crear el respaldo básico (.BAK), NO es necesario instalarlo.
         }
         $pbBackup.Value = 0
         $txtProgress.Text = "Esperando..."
+        $txtCloudLink.Text = ""
+        $pnlCloudLink.Visibility = [System.Windows.Visibility]::Collapsed
         $cloudUpload = ($chkSubir.IsChecked -eq $true)
         if ($cloudUpload -and $chkComprimir.IsChecked -ne $true) {
           Ui-Warn "La subida a nube solo está disponible para respaldos comprimidos." "Compresión requerida" $window
           Reset-BackupUI -ProgressText "Configura compresión"
-          return
-        }
-        if ($cloudUpload -and -not (Test-R2CloudConfigured)) {
-          Ui-Warn "Configura la URL del Worker antes de subir a nube." "Acceso nube requerido" $window
-          Reset-BackupUI -ProgressText "Configura acceso nube"
           return
         }
         if ($cloudUpload -and [string]::IsNullOrWhiteSpace([string]$pwdCloudSecret.Password)) {
