@@ -1314,7 +1314,8 @@ function Get-MainWindowXaml {
                             <Button Content="Extractor de Instalador" Name="btnExtractInstaller" Margin="0,0,0,10" Style="{StaticResource NationalSoftButtonStyle}"/>
                             <Button Content="Instaladores NS" Name="btnInstaladoresNS" Margin="0,0,0,10" Style="{StaticResource NationalSoftButtonStyle}"/>
                             <Button Content="Registro de dlls" Name="btnRegisterDlls" Margin="0,0,0,10" Style="{StaticResource NationalSoftButtonStyle}"/>
-                            <Button Content="Log Monitor Servicios" Name="btnMonitorServiciosLog" Style="{StaticResource NationalSoftButtonStyle}"/>
+                            <Button Content="Log Monitor Servicios" Name="btnMonitorServiciosLog" Margin="0,0,0,10" Style="{StaticResource NationalSoftButtonStyle}"/>
+                            <Button Content="Limpiar SQLite" Name="btnLimpiarSQLite" Style="{StaticResource NationalSoftButtonStyle}"/>
                         </StackPanel>
 
                         <StackPanel Grid.Column="3" VerticalAlignment="Top">

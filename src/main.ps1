@@ -28,7 +28,7 @@ function Write-Log {
 }
 Write-Host "`nImportando módulos..." -ForegroundColor Yellow
 $modulesPath = Join-Path $PSScriptRoot "modules"
-$modules = @("GUI.psm1", "Database.psm1", "Utilities.psm1", "CloudBackup.psm1", "SqlTreeView.psm1", "Installers.psm1", "WindowsUtilities.psm1", "NationalUtilities.psm1", "SqlOps.psm1", "QueriesPad.psm1", "AISqlContext.psm1", "AI.psm1")
+$modules = @("GUI.psm1", "Database.psm1", "Utilities.psm1", "SqliteOps.psm1", "CloudBackup.psm1", "SqlTreeView.psm1", "Installers.psm1", "WindowsUtilities.psm1", "NationalUtilities.psm1", "SqlOps.psm1", "QueriesPad.psm1", "AISqlContext.psm1", "AI.psm1")
 foreach ($module in $modules) {
     $modulePath = Join-Path $modulesPath $module
     if (Test-Path $modulePath) {
@@ -161,6 +161,7 @@ function New-MainForm {
     $btnInstaladoresNS = $window.FindName("btnInstaladoresNS")
     $btnRegisterDlls = $window.FindName("btnRegisterDlls")
     $btnMonitorServiciosLog = $window.FindName("btnMonitorServiciosLog")
+    $btnLimpiarSQLite = $window.FindName("btnLimpiarSQLite")
     $txtServer = $window.FindName("txtServer")
     $txtUser = $window.FindName("txtUser")
     $txtPassword = $window.FindName("txtPassword")
@@ -417,7 +418,7 @@ function New-MainForm {
             Write-DzDebug "`t[DEBUG] Error aplicando credenciales iniciales: $_" -Color Yellow
         }
     }
-    $buttonsToUpdate = @($LZMAbtnBuscarCarpeta, $btnInstalarHerramientas, $btnFirewallConfig, $btnProfiler, $btnDatabase, $btnSQLManager, $btnSQLManagement, $btnPrinterTool, $btnLectorDPicacls, $btnConfigurarIPs, $btnAddUser, $btnForzarActualizacion, $btnClearAnyDesk, $btnShowPrinters, $btnInstallPrinter, $btnClearPrintJobs, $btnAplicacionesNS, $btnCheckPermissions, $btnCambiarOTM, $btnCreateAPK, $btnExtractInstaller, $btnInstaladoresNS, $btnRegisterDlls, $btnMonitorServiciosLog)
+    $buttonsToUpdate = @($LZMAbtnBuscarCarpeta, $btnInstalarHerramientas, $btnFirewallConfig, $btnProfiler, $btnDatabase, $btnSQLManager, $btnSQLManagement, $btnPrinterTool, $btnLectorDPicacls, $btnConfigurarIPs, $btnAddUser, $btnForzarActualizacion, $btnClearAnyDesk, $btnShowPrinters, $btnInstallPrinter, $btnClearPrintJobs, $btnAplicacionesNS, $btnCheckPermissions, $btnCambiarOTM, $btnCreateAPK, $btnExtractInstaller, $btnInstaladoresNS, $btnRegisterDlls, $btnMonitorServiciosLog, $btnLimpiarSQLite)
     foreach ($button in $buttonsToUpdate) {
         $button.Add_MouseLeave({ if ($script:setInstructionText) { $script:setInstructionText.Invoke($global:defaultInstructions) } })
     }
@@ -700,6 +701,27 @@ function New-MainForm {
             Write-Host "`n- - - Comenzando el proceso de 'Log Monitor Servicios' - - -" -ForegroundColor Magenta
             Invoke-NSMonitorServicesLogSetup -Owner $window
         })
+    $btnLimpiarSQLite.Add_Click({
+            Write-DzDebug ("`t[DEBUG] Click en 'Limpiar SQLite' - {0}" -f (Get-Date -Format "HH:mm:ss")) -Color DarkYellow
+            Write-Host "`n- - - Comenzando el proceso de 'Limpiar SQLite' - - -" -ForegroundColor Magenta
+            try {
+                Show-DzSqliteCleanerDialog -Owner $window
+            } catch {
+                $details = @(
+                    "[SQLite][ERROR] Error no controlado desde el click de Limpiar SQLite"
+                    "Mensaje: $($_.Exception.Message)"
+                    "Tipo: $($_.Exception.GetType().FullName)"
+                    "Archivo: $($_.InvocationInfo.ScriptName)"
+                    "Linea: $($_.InvocationInfo.ScriptLineNumber)"
+                    "Codigo: $($_.InvocationInfo.Line.Trim())"
+                    "ScriptStackTrace:`n$($_.ScriptStackTrace)"
+                    "StackTrace .NET:`n$($_.Exception.StackTrace)"
+                ) -join "`n"
+                Write-DzDebug -Message $details -Color Red
+                Write-Host $details -ForegroundColor Red
+                Ui-Error "Error al abrir el editor SQLite:`r`n$($_.Exception.Message)" $global:MainWindow
+            }
+        })
     $btnCambiarOTM.Add_Click({
             Write-DzDebug ("`t[DEBUG] Click en 'Cambiar OTM' - {0}" -f (Get-Date -Format "HH:mm:ss")) -Color DarkYellow
             Write-Host "`n- - - Comenzando el proceso de 'Cambiar OTM' - - -" -ForegroundColor Magenta
@@ -909,7 +931,7 @@ function Start-Application {
     Write-Host "  ✓ Entorno listo" -ForegroundColor Green
     Write-Host "`nCargando módulos..." -ForegroundColor Yellow
     $modulesPath = Join-Path $PSScriptRoot "modules"
-    $modules = @("GUI.psm1", "Database.psm1", "Utilities.psm1", "SqlTreeView.psm1", "Installers.psm1", "WindowsUtilities.psm1", "NationalUtilities.psm1", "SqlOps.psm1", "QueriesPad.psm1")
+    $modules = @("GUI.psm1", "Database.psm1", "Utilities.psm1", "SqliteOps.psm1", "SqlTreeView.psm1", "Installers.psm1", "WindowsUtilities.psm1", "NationalUtilities.psm1", "SqlOps.psm1", "QueriesPad.psm1")
     foreach ($module in $modules) {
         $modulePath = Join-Path $modulesPath $module
         if (Test-Path $modulePath) {
