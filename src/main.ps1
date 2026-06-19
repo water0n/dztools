@@ -161,7 +161,7 @@ function New-MainForm {
     $btnInstaladoresNS = $window.FindName("btnInstaladoresNS")
     $btnRegisterDlls = $window.FindName("btnRegisterDlls")
     $btnMonitorServiciosLog = $window.FindName("btnMonitorServiciosLog")
-    $btnLimpiarSQLite = $window.FindName("btnLimpiarSQLite")
+    $btndzSQLite = $window.FindName("btndzSQLite")
     $txtServer = $window.FindName("txtServer")
     $txtUser = $window.FindName("txtUser")
     $txtPassword = $window.FindName("txtPassword")
@@ -418,7 +418,7 @@ function New-MainForm {
             Write-DzDebug "`t[DEBUG] Error aplicando credenciales iniciales: $_" -Color Yellow
         }
     }
-    $buttonsToUpdate = @($LZMAbtnBuscarCarpeta, $btnInstalarHerramientas, $btnFirewallConfig, $btnProfiler, $btnDatabase, $btnSQLManager, $btnSQLManagement, $btnPrinterTool, $btnLectorDPicacls, $btnConfigurarIPs, $btnAddUser, $btnForzarActualizacion, $btnClearAnyDesk, $btnShowPrinters, $btnInstallPrinter, $btnClearPrintJobs, $btnAplicacionesNS, $btnCheckPermissions, $btnCambiarOTM, $btnCreateAPK, $btnExtractInstaller, $btnInstaladoresNS, $btnRegisterDlls, $btnMonitorServiciosLog, $btnLimpiarSQLite)
+    $buttonsToUpdate = @($LZMAbtnBuscarCarpeta, $btnInstalarHerramientas, $btnFirewallConfig, $btnProfiler, $btnDatabase, $btnSQLManager, $btnSQLManagement, $btnPrinterTool, $btnLectorDPicacls, $btnConfigurarIPs, $btnAddUser, $btnForzarActualizacion, $btnClearAnyDesk, $btnShowPrinters, $btnInstallPrinter, $btnClearPrintJobs, $btnAplicacionesNS, $btnCheckPermissions, $btnCambiarOTM, $btnCreateAPK, $btnExtractInstaller, $btnInstaladoresNS, $btnRegisterDlls, $btnMonitorServiciosLog, $btndzSQLite)
     foreach ($button in $buttonsToUpdate) {
         $button.Add_MouseLeave({ if ($script:setInstructionText) { $script:setInstructionText.Invoke($global:defaultInstructions) } })
     }
@@ -701,7 +701,7 @@ function New-MainForm {
             Write-Host "`n- - - Comenzando el proceso de 'Log Monitor Servicios' - - -" -ForegroundColor Magenta
             Invoke-NSMonitorServicesLogSetup -Owner $window
         })
-    $btnLimpiarSQLite.Add_Click({
+    $btndzSQLite.Add_Click({
             Write-DzDebug ("`t[DEBUG] Click en 'Limpiar SQLite' - {0}" -f (Get-Date -Format "HH:mm:ss")) -Color DarkYellow
             Write-Host "`n- - - Comenzando el proceso de 'Limpiar SQLite' - - -" -ForegroundColor Magenta
             try {

@@ -790,6 +790,19 @@ function Remove-DzSqliteRowsByField {
     [int64]$deleted
 }
 
+function Get-DzSqliteBackupDirectory {
+    [CmdletBinding()]
+    param(
+        [string]$DbPath = $script:DzSqliteDefaultDbPath
+    )
+
+    $dbDir = [System.IO.Path]::GetDirectoryName($DbPath)
+    if ([string]::IsNullOrWhiteSpace($dbDir)) {
+        $dbDir = "C:\NationalSoft"
+    }
+    Join-Path $dbDir "Respaldos"
+}
+
 function New-DzSqliteBackup {
     [CmdletBinding()]
     param(
@@ -801,7 +814,7 @@ function New-DzSqliteBackup {
         throw "No existe la base SQLite: $DbPath"
     }
 
-    $backupDir = "C:\temp\dztools\sqlite-backups"
+    $backupDir = Get-DzSqliteBackupDirectory -DbPath $DbPath
     if (-not (Test-Path -LiteralPath $backupDir)) {
         New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
     }
@@ -1427,7 +1440,7 @@ function Show-DzSqliteCleanerDialog {
             $txtQueryMessages.Clear()
         })
     $c["btnOpenBackupFolder"].Add_Click({
-            $backupDir = "C:\temp\dztools\sqlite-backups"
+            $backupDir = Get-DzSqliteBackupDirectory -DbPath $dbPath
             if (-not (Test-Path -LiteralPath $backupDir)) { New-Item -ItemType Directory -Path $backupDir -Force | Out-Null }
             Start-Process -FilePath "explorer.exe" -ArgumentList "`"$backupDir`""
         })
@@ -1813,6 +1826,7 @@ Export-ModuleMember -Function @(
     'Get-DzSqliteTableData',
     'Get-DzSqliteDeletePreview',
     'Remove-DzSqliteRowsByField',
+    'Get-DzSqliteBackupDirectory',
     'New-DzSqliteBackup',
     'Show-DzSqliteCleanerDialog'
 )
