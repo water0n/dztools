@@ -484,6 +484,192 @@ function Load-IniConnectionsToComboBox {
         $Combo.Text = ".\NationalSoft"
     }
 }
+function ConvertTo-DzMarkdownTableText {
+    [CmdletBinding()]
+    param(
+        [Parameter()][AllowNull()]$Value,
+        [Parameter()][string]$NullText = ""
+    )
+    if ($null -eq $Value -or $Value -is [System.DBNull]) {
+        $text = $NullText
+    } elseif ($Value -is [datetime]) {
+        $text = ([datetime]$Value).ToString("yyyy-MM-dd HH:mm:ss.fff")
+    } elseif ($Value -is [bool]) {
+        if ($Value) { $text = "True" } else { $text = "False" }
+    } else {
+        $text = [string]$Value
+    }
+    $text = $text -replace "`t", " " -replace "`r`n", " " -replace "`n", " " -replace "`r", " "
+    return $text.Replace('|', '\|')
+}
+function New-DzMarkdownTableText {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$Headers,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$Rows
+    )
+    if (-not $Headers -or $Headers.Count -eq 0) { return "" }
+    $headerValues = @()
+    foreach ($header in $Headers) {
+        $headerValues += ConvertTo-DzMarkdownTableText -Value $header -NullText ""
+    }
+    $normalizedRows = @()
+    foreach ($row in @($Rows)) {
+        $cells = @()
+        for ($i = 0; $i -lt $headerValues.Count; $i++) {
+            $value = $null
+            if ($row -is [array]) {
+                if ($i -lt $row.Count) { $value = $row[$i] }
+            } elseif ($row -is [System.Collections.IList]) {
+                if ($i -lt $row.Count) { $value = $row[$i] }
+            } elseif ($i -eq 0) {
+                $value = $row
+            }
+            $cells += ConvertTo-DzMarkdownTableText -Value $value -NullText "NULL"
+        }
+        $normalizedRows += ,$cells
+    }
+    $widths = @()
+    for ($i = 0; $i -lt $headerValues.Count; $i++) {
+        $headerText = [string]$headerValues[$i]
+        $width = [Math]::Max(3, $headerText.Length)
+        foreach ($row in $normalizedRows) {
+            $cellText = ""
+            if ($i -lt $row.Count -and $null -ne $row[$i]) { $cellText = [string]$row[$i] }
+            $width = [Math]::Max($width, $cellText.Length)
+        }
+        $widths += $width
+    }
+    $buildRow = {
+        param([array]$Cells, [array]$Widths)
+        $parts = @()
+        for ($i = 0; $i -lt $Widths.Count; $i++) {
+            $cell = ""
+            if ($i -lt $Cells.Count -and $null -ne $Cells[$i]) { $cell = [string]$Cells[$i] }
+            $parts += $cell.PadRight([int]$Widths[$i])
+        }
+        return "| " + ($parts -join " | ") + " |"
+    }
+    $separatorCells = @()
+    foreach ($width in $widths) {
+        $separatorCells += "".PadRight([int]$width, [char]'-')
+    }
+    $lines = @()
+    $lines += & $buildRow $headerValues $widths
+    $lines += & $buildRow $separatorCells $widths
+    foreach ($row in $normalizedRows) {
+        $lines += & $buildRow $row $widths
+    }
+    return ($lines -join "`r`n")
+}
+function Get-DzDataGridColumnHeaderText {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$Column)
+    if ($Column.Header -is [string]) { return ($Column.Header -replace '__', '_') }
+    if ($Column.Header) { return ($Column.Header.ToString() -replace '__', '_') }
+    return ""
+}
+function Get-DzDataGridColumnPropertyName {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$Column)
+    if ($Column -is [System.Windows.Controls.DataGridBoundColumn]) {
+        $binding = $Column.Binding
+        if ($binding -and $binding.Path) { return $binding.Path.Path }
+    }
+    if ($Column.SortMemberPath) { return $Column.SortMemberPath }
+    return (Get-DzDataGridColumnHeaderText -Column $Column)
+}
+function Get-DzDataGridCellValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]$Row,
+        [Parameter(Mandatory = $true)]$Column
+    )
+    $propName = Get-DzDataGridColumnPropertyName -Column $Column
+    if ([string]::IsNullOrWhiteSpace($propName)) { return $null }
+    try {
+        if ($Row -is [System.Data.DataRowView]) { return $Row[$propName] }
+        if ($Row.PSObject.Properties[$propName]) { return $Row.PSObject.Properties[$propName].Value }
+        return $Row.$propName
+    } catch {
+        return ""
+    }
+}
+function Test-DzReferenceInArray {
+    [CmdletBinding()]
+    param(
+        [Parameter()][AllowEmptyCollection()][array]$Items,
+        [Parameter()][AllowNull()]$Item
+    )
+    foreach ($existing in @($Items)) {
+        if ([object]::ReferenceEquals($existing, $Item)) { return $true }
+    }
+    return $false
+}
+function Get-DzDataGridSelectionTable {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$Grid)
+    $visibleCols = @($Grid.Columns | Where-Object { $_.Visibility -eq 'Visible' } | Sort-Object DisplayIndex)
+    if ($visibleCols.Count -eq 0) { return $null }
+    if (($Grid.SelectedItems -and $Grid.SelectedItems.Count -gt 0) -and
+        (-not $Grid.SelectedCells -or $Grid.SelectedCells.Count -eq 0)) {
+        $selectedRows = @($Grid.SelectedItems | Where-Object { $null -ne $_ } | Sort-Object -Property @{ Expression = { try { $Grid.Items.IndexOf($_) } catch { 0 } } })
+        if ($selectedRows.Count -eq 0) { return $null }
+        $rows = @()
+        foreach ($row in $selectedRows) {
+            $values = @()
+            foreach ($col in $visibleCols) {
+                $values += Get-DzDataGridCellValue -Row $row -Column $col
+            }
+            $rows += ,$values
+        }
+        return [pscustomobject]@{
+            Headers     = @($visibleCols | ForEach-Object { Get-DzDataGridColumnHeaderText -Column $_ })
+            Rows        = $rows
+            RowCount    = $rows.Count
+            ColumnCount = $visibleCols.Count
+        }
+    }
+    if (-not $Grid.SelectedCells -or $Grid.SelectedCells.Count -eq 0) { return $null }
+    $selectedCells = @(
+        $Grid.SelectedCells |
+        Sort-Object -Property @{ Expression = { try { $Grid.Items.IndexOf($_.Item) } catch { 0 } } }, @{ Expression = { $_.Column.DisplayIndex } }
+    )
+    if ($selectedCells.Count -eq 0) { return $null }
+    $columns = @()
+    $rowItems = @()
+    foreach ($cell in $selectedCells) {
+        if ($cell.Column -and -not (Test-DzReferenceInArray -Items $columns -Item $cell.Column)) { $columns += $cell.Column }
+        if ($null -ne $cell.Item -and -not (Test-DzReferenceInArray -Items $rowItems -Item $cell.Item)) { $rowItems += $cell.Item }
+    }
+    $columns = @($columns | Sort-Object DisplayIndex)
+    if ($columns.Count -eq 0 -or $rowItems.Count -eq 0) { return $null }
+    $rows = @()
+    foreach ($row in $rowItems) {
+        $values = @()
+        foreach ($col in $columns) {
+            $hasCell = $false
+            foreach ($cell in $selectedCells) {
+                if ([object]::ReferenceEquals($cell.Item, $row) -and [object]::ReferenceEquals($cell.Column, $col)) {
+                    $hasCell = $true
+                    break
+                }
+            }
+            if ($hasCell) {
+                $values += Get-DzDataGridCellValue -Row $row -Column $col
+            } else {
+                $values += ""
+            }
+        }
+        $rows += ,$values
+    }
+    return [pscustomobject]@{
+        Headers     = @($columns | ForEach-Object { Get-DzDataGridColumnHeaderText -Column $_ })
+        Rows        = $rows
+        RowCount    = $rows.Count
+        ColumnCount = $columns.Count
+    }
+}
 function Show-MultipleResultSets {
     [CmdletBinding()]
     param(
@@ -852,6 +1038,22 @@ function Show-MultipleResultSets {
                 Write-DzDebug "`t[DEBUG][DataGrid] Error en copiar: $_" -Color Red
             }
         }.GetNewClosure()
+        $databaseModule = $ExecutionContext.SessionState.Module
+        $CopyMarkdownToClipboard = {
+            try {
+                $module = $databaseModule
+                if (-not $module) { $module = Get-Module Database | Select-Object -First 1 }
+                if (-not $module) { throw "No se pudo resolver el módulo Database para copiar Markdown." }
+                $selection = & $module { param($grid) Get-DzDataGridSelectionTable -Grid $grid } $dg
+                if (-not $selection -or -not $selection.Headers -or $selection.Headers.Count -eq 0 -or -not $selection.Rows -or $selection.Rows.Count -eq 0) { return }
+                $textToCopy = & $module { param($headers, $rows) New-DzMarkdownTableText -Headers $headers -Rows $rows } $selection.Headers $selection.Rows
+                if ([string]::IsNullOrWhiteSpace($textToCopy)) { return }
+                [System.Windows.Clipboard]::SetText($textToCopy)
+                Write-DzDebug "`t[DEBUG][DataGrid] ✓ Copiado Markdown: $($selection.RowCount) filas × $($selection.ColumnCount) columnas"
+            } catch {
+                Write-DzDebug "`t[DEBUG][DataGrid] Error en copiar Markdown: $_" -Color Red
+            }
+        }.GetNewClosure()
         $copyFn = $CopyToClipboard
         $dg.Add_PreviewKeyDown({
                 param($s, $e)
@@ -877,6 +1079,10 @@ function Show-MultipleResultSets {
         $menuCopyHeaders.Header = "Copiar con encabezados       Ctrl+Shift+C"
         $menuCopyHeaders.Add_Click({ & $CopyToClipboard $true }.GetNewClosure())
         [void]$contextMenu.Items.Add($menuCopyHeaders)
+        $menuCopyMarkdown = New-Object System.Windows.Controls.MenuItem
+        $menuCopyMarkdown.Header = "Copiar como Markdown"
+        $menuCopyMarkdown.Add_Click({ & $CopyMarkdownToClipboard }.GetNewClosure())
+        [void]$contextMenu.Items.Add($menuCopyMarkdown)
         [void]$contextMenu.Items.Add((New-Object System.Windows.Controls.Separator))
         $menuSelectAll = New-Object System.Windows.Controls.MenuItem
         $menuSelectAll.Header = "Seleccionar todo                  Ctrl+A"
