@@ -48,12 +48,14 @@ foreach ($module in $modules) {
 $global:defaultInstructions = @"
 ----- CAMBIOS -----
 - Se agregó botón para SQLite Browser (dzSQLite)
+    * Se agregó opción para incluir el respaldo de la base de datos en el mismo archivo comprimido.
 - Subida a CloudFare Buckets
 - AI SQL Context para generar consultas con IA (beta)
 - Nuevo botón para Innstaladores NS
 - Monitor de servicios y logs
 - Historial de queries
 - SSMS Portable
+    * Copiar ahora permite tipo markdown.
     * TreeView nuevo!
     * Crear y eliminar bases de datos
     * Attach / detach de base de datos

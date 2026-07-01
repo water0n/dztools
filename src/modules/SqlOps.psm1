@@ -3417,6 +3417,7 @@ function Show-BackupDialog {
                   <RowDefinition Height="Auto"/>
                   <RowDefinition Height="Auto"/>
                   <RowDefinition Height="Auto"/>
+                  <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <CheckBox x:Name="chkComprimir" Grid.Row="0" Style="{StaticResource CheckBoxStyle}">
                   <TextBlock Text="Comprimir (requiere Chocolatey + 7-Zip)" FontWeight="SemiBold"/>
@@ -3430,10 +3431,13 @@ function Show-BackupDialog {
                   <PasswordBox x:Name="txtPassword" Grid.Column="0" Style="{StaticResource PasswordBoxStyle}"/>
                   <Button x:Name="btnTogglePassword" Grid.Column="1" Content="👁" Width="34" Height="34" Margin="8,0,0,0" Style="{StaticResource SecondaryButtonStyle}"/>
                 </Grid>
-                <CheckBox x:Name="chkSubir" Grid.Row="3" Style="{StaticResource CheckBoxStyle}" Margin="0,10,0,0" IsChecked="False" ToolTip="Requiere compresión; el secret se captura manualmente.">
+                <CheckBox x:Name="chkIncludeSqlite" Grid.Row="3" Style="{StaticResource CheckBoxStyle}" Margin="0,10,0,0" IsChecked="False" ToolTip="Incluye un respaldo nuevo de SQLite dentro del ZIP.">
+                  <TextBlock Text="Incluir respaldo SQLite" FontWeight="SemiBold"/>
+                </CheckBox>
+                <CheckBox x:Name="chkSubir" Grid.Row="4" Style="{StaticResource CheckBoxStyle}" Margin="0,10,0,0" IsChecked="False" ToolTip="Requiere compresión; el secret se captura manualmente.">
                   <TextBlock Text="Subir a nube (R2)" FontWeight="SemiBold"/>
                 </CheckBox>
-                <PasswordBox x:Name="pwdCloudSecret" Grid.Row="4" Style="{StaticResource PasswordBoxStyle}" Margin="0,4,0,0" ToolTip="Secret/token de nube. No se guarda; debes capturarlo cada vez."/>
+                <PasswordBox x:Name="pwdCloudSecret" Grid.Row="5" Style="{StaticResource PasswordBoxStyle}" Margin="0,4,0,0" ToolTip="Secret/token de nube. No se guarda; debes capturarlo cada vez."/>
               </Grid>
             </Grid>
           </Grid>
@@ -3564,6 +3568,7 @@ function Show-BackupDialog {
   $chkComprimir = Get-Ctrl "chkComprimir"
   $txtPassword = Get-Ctrl "txtPassword"
   $lblPassword = Get-Ctrl "lblPassword"
+  $chkIncludeSqlite = Get-Ctrl "chkIncludeSqlite"
   $chkSubir = Get-Ctrl "chkSubir"
   $pwdCloudSecret = Get-Ctrl "pwdCloudSecret"
   $pbBackup = Get-Ctrl "pbBackup"
@@ -3586,7 +3591,7 @@ function Show-BackupDialog {
     Write-DzDebug "`t[DEBUG][Show-BackupDialog] Carpeta por omisión establecida: $defaultBackupPath"
   }
 
-  Write-DzDebug "`t[DEBUG][Show-BackupDialog] Controles: chkRespaldo=$([bool]$chkRespaldo) txtNombre=$([bool]$txtNombre) chkComprimir=$([bool]$chkComprimir) txtPassword=$([bool]$txtPassword) lblPassword=$([bool]$lblPassword) chkSubir=$([bool]$chkSubir) pwdCloudSecret=$([bool]$pwdCloudSecret) btnToggleOptions=$([bool]$btnToggleOptions) pnlBackupOptionsBody=$([bool]$pnlBackupOptionsBody) pbBackup=$([bool]$pbBackup) txtProgress=$([bool]$txtProgress) txtLog=$([bool]$txtLog) pnlCloudLink=$([bool]$pnlCloudLink) txtCloudLink=$([bool]$txtCloudLink) btnAbrirLink=$([bool]$btnAbrirLink) btnCopiarLink=$([bool]$btnCopiarLink) btnAceptar=$([bool]$btnAceptar) btnAbrirCarpeta=$([bool]$btnAbrirCarpeta) btnCerrar=$([bool]$btnCerrar) btnTogglePassword=$([bool]$btnTogglePassword)"
+  Write-DzDebug "`t[DEBUG][Show-BackupDialog] Controles: chkRespaldo=$([bool]$chkRespaldo) txtNombre=$([bool]$txtNombre) chkComprimir=$([bool]$chkComprimir) txtPassword=$([bool]$txtPassword) lblPassword=$([bool]$lblPassword) chkIncludeSqlite=$([bool]$chkIncludeSqlite) chkSubir=$([bool]$chkSubir) pwdCloudSecret=$([bool]$pwdCloudSecret) btnToggleOptions=$([bool]$btnToggleOptions) pnlBackupOptionsBody=$([bool]$pnlBackupOptionsBody) pbBackup=$([bool]$pbBackup) txtProgress=$([bool]$txtProgress) txtLog=$([bool]$txtLog) pnlCloudLink=$([bool]$pnlCloudLink) txtCloudLink=$([bool]$txtCloudLink) btnAbrirLink=$([bool]$btnAbrirLink) btnCopiarLink=$([bool]$btnCopiarLink) btnAceptar=$([bool]$btnAceptar) btnAbrirCarpeta=$([bool]$btnAbrirCarpeta) btnCerrar=$([bool]$btnCerrar) btnTogglePassword=$([bool]$btnTogglePassword)"
   $window.WindowStartupLocation = "Manual"
   $window.Add_Loaded({
       try {
@@ -3643,7 +3648,7 @@ function Show-BackupDialog {
         Safe-CloseWindow -Window $window -Result $false
       }
     })
-  if (-not $txtNombre -or -not $txtServerBackupFolder -or -not $btnBrowseServerBackupFolder -or -not $chkComprimir -or -not $txtPassword -or -not $lblPassword -or -not $chkSubir -or -not $pwdCloudSecret -or -not $btnToggleOptions -or -not $pnlBackupOptionsBody -or -not $pbBackup -or -not $txtProgress -or -not $txtLog -or -not $pnlCloudLink -or -not $txtCloudLink -or -not $btnAbrirLink -or -not $btnCopiarLink -or -not $btnAceptar -or -not $btnAbrirCarpeta -or -not $btnCerrar) {
+  if (-not $txtNombre -or -not $txtServerBackupFolder -or -not $btnBrowseServerBackupFolder -or -not $chkComprimir -or -not $txtPassword -or -not $lblPassword -or -not $chkIncludeSqlite -or -not $chkSubir -or -not $pwdCloudSecret -or -not $btnToggleOptions -or -not $pnlBackupOptionsBody -or -not $pbBackup -or -not $txtProgress -or -not $txtLog -or -not $pnlCloudLink -or -not $txtCloudLink -or -not $btnAbrirLink -or -not $btnCopiarLink -or -not $btnAceptar -or -not $btnAbrirCarpeta -or -not $btnCerrar) {
     Write-DzDebug "`t[DEBUG][Show-BackupDialog] ERROR: uno o más controles son NULL. Cerrando..."
     throw "Controles WPF incompletos (FindName devolvió NULL)."
   }
@@ -3652,6 +3657,7 @@ function Show-BackupDialog {
   $txtNombre.Text = ("$Database-$timestampsDefault.bak")
   $txtPassword.IsEnabled = $false
   $lblPassword.IsEnabled = $false
+  $chkIncludeSqlite.IsEnabled = $false
   $script:BackupOptionsExpanded = $true
   function Set-BackupOptionsExpanded {
     param([bool]$Expanded)
@@ -3668,7 +3674,15 @@ function Show-BackupDialog {
       Set-BackupOptionsExpanded -Expanded (-not $script:BackupOptionsExpanded)
     })
   function Update-CloudUploadUI {
-    $chkSubir.IsEnabled = ($chkComprimir.IsChecked -eq $true)
+    $compressionEnabled = ($chkComprimir.IsChecked -eq $true)
+    $chkIncludeSqlite.IsEnabled = $compressionEnabled
+    if (-not $chkIncludeSqlite.IsEnabled) { $chkIncludeSqlite.IsChecked = $false }
+    if ($chkIncludeSqlite.IsEnabled) {
+      $chkIncludeSqlite.ToolTip = "Incluye un respaldo nuevo de SQLite dentro del ZIP."
+    } else {
+      $chkIncludeSqlite.ToolTip = "Requiere comprimir el respaldo primero."
+    }
+    $chkSubir.IsEnabled = $compressionEnabled
     $pwdCloudSecret.IsEnabled = ($chkSubir.IsChecked -eq $true) -and $chkSubir.IsEnabled
     if (-not $chkSubir.IsEnabled) { $chkSubir.IsChecked = $false; $pwdCloudSecret.Password = "" }
     if ($chkSubir.IsEnabled) {
@@ -3681,6 +3695,7 @@ function Show-BackupDialog {
 
   $logQueue = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
   $progressQueue = New-Object 'System.Collections.Concurrent.ConcurrentQueue[hashtable]'
+  $promptQueue = New-Object 'System.Collections.Concurrent.ConcurrentQueue[string]'
   $script:DonePopupShown = $false
   $script:LastDoneStatus = $null
   function Paint-Progress { param([int]$Percent, [string]$Message) $pbBackup.Value = $Percent; $txtProgress.Text = $Message }
@@ -3713,7 +3728,7 @@ function Show-BackupDialog {
       Ui-Error "No se pudo abrir el link: $($_.Exception.Message)" "Error" $window
     }
   }
-  function Disable-CompressionUI { $chkComprimir.IsChecked = $false; $txtPassword.IsEnabled = $false; $lblPassword.IsEnabled = $false; $txtPassword.Password = "" }
+  function Disable-CompressionUI { $chkComprimir.IsChecked = $false; $txtPassword.IsEnabled = $false; $lblPassword.IsEnabled = $false; $txtPassword.Password = ""; $chkIncludeSqlite.IsChecked = $false; $chkIncludeSqlite.IsEnabled = $false; Update-CloudUploadUI }
   function New-SafeCredential { param([string]$Username, [string]$PlainPassword) $secure = New-Object System.Security.SecureString; foreach ($ch in $PlainPassword.ToCharArray()) { $secure.AppendChar($ch) }; $secure.MakeReadOnly(); New-Object System.Management.Automation.PSCredential($Username, $secure) }
   $btnCopiarLink.Add_Click({
       $link = ([string]$txtCloudLink.Text).Trim()
@@ -3769,18 +3784,34 @@ function Show-BackupDialog {
       [bool]$DoCompress,
       [string]$ZipPassword,
       [System.Management.Automation.PSCredential]$Credential,
+      [bool]$IncludeSqliteBackup,
+      [string]$SqliteOpsModulePath,
       [bool]$DoCloudUpload,
       [string]$CloudWorkerUrl,
       [string]$CloudToken,
       [System.Collections.Concurrent.ConcurrentQueue[string]]$LogQueue,
-      [System.Collections.Concurrent.ConcurrentQueue[hashtable]]$ProgressQueue
+      [System.Collections.Concurrent.ConcurrentQueue[hashtable]]$ProgressQueue,
+      [System.Collections.Concurrent.ConcurrentQueue[string]]$PromptQueue
     )
     Write-DzDebug "`t[DEBUG][Start-BackupWorkAsync] Preparando runspace..."
     $worker = {
-      param($Server, $Database, $BackupQuery, $ScriptBackupPath, $DoCompress, $ZipPassword, $Credential, $DoCloudUpload, $CloudWorkerUrl, $CloudToken, $LogQueue, $ProgressQueue)
+      param($Server, $Database, $BackupQuery, $ScriptBackupPath, $DoCompress, $ZipPassword, $Credential, $IncludeSqliteBackup, $SqliteOpsModulePath, $DoCloudUpload, $CloudWorkerUrl, $CloudToken, $LogQueue, $ProgressQueue, $PromptQueue)
       function EnqLog([string]$m) { $LogQueue.Enqueue(("{0} {1}" -f (Get-Date -Format 'HH:mm:ss'), $m)) }
       function EnqProg([int]$p, [string]$m) { $ProgressQueue.Enqueue(@{Percent = $p; Message = $m }) }
       function EnqSep { EnqLog "=======================================" }
+      function Request-ContinueWithoutSqliteBackup {
+        param([string]$Message)
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$Message)
+        $encoded = [Convert]::ToBase64String($bytes)
+        EnqLog ("__SQLITE_BACKUP_FAILED__{0}" -f $encoded)
+        $answer = $null
+        while ($true) {
+          if ($PromptQueue.TryDequeue([ref]$answer)) {
+            return ([string]$answer -eq "YES")
+          }
+          Start-Sleep -Milliseconds 200
+        }
+      }
       function Invoke-WorkerJson {
         param([string]$Path, [hashtable]$Body)
         $uri = "{0}{1}" -f $CloudWorkerUrl.TrimEnd('/'), $Path
@@ -3920,6 +3951,7 @@ function Show-BackupDialog {
           EnqLog "🗜️ Iniciando compresión ZIP..."
           $inputBak = $ScriptBackupPath
           $zipPath = "$ScriptBackupPath.zip"
+          $sqliteBackupPath = $null
           $bakReadable = $false
           try {
             $testStream = [System.IO.File]::OpenRead($inputBak)
@@ -3936,12 +3968,50 @@ function Show-BackupDialog {
             EnqLog "__DONE_WARN__"
             return
           }
+          if ($IncludeSqliteBackup) {
+            try {
+              EnqProg 91 "Creando respaldo SQLite..."
+              EnqLog "🗄️ Creando respaldo SQLite para incluirlo en el ZIP..."
+              if ([string]::IsNullOrWhiteSpace($SqliteOpsModulePath) -or -not (Test-Path -LiteralPath $SqliteOpsModulePath -PathType Leaf)) {
+                throw "No se encontró el módulo SQLite: $SqliteOpsModulePath"
+              }
+              Import-Module $SqliteOpsModulePath -Force -DisableNameChecking -ErrorAction Stop
+              $sqliteDllPath = Initialize-DzSqliteRuntime
+              $sqliteBackupPath = New-DzSqliteBackup -DllPath $sqliteDllPath
+              if ([string]::IsNullOrWhiteSpace($sqliteBackupPath) -or -not (Test-Path -LiteralPath $sqliteBackupPath -PathType Leaf)) {
+                throw "No se generó el respaldo SQLite."
+              }
+              $sqliteMB = [math]::Round((Get-Item -LiteralPath $sqliteBackupPath).Length / 1MB, 2)
+              EnqLog ("✅ Respaldo SQLite creado ({0} MB): {1}" -f $sqliteMB, $sqliteBackupPath)
+            } catch {
+              $sqliteError = $_.Exception.Message
+              EnqProg 91 "Fallo respaldo SQLite"
+              EnqLog ("⚠️ Fallo al respaldar SQLite: {0}" -f $sqliteError)
+              $continueWithoutSqlite = Request-ContinueWithoutSqliteBackup -Message $sqliteError
+              if (-not $continueWithoutSqlite) {
+                EnqProg 0 "Compresión cancelada"
+                EnqLog "⚠️ Compresión cancelada por el usuario. El .BAK ya fue generado."
+                EnqLog "__DONE_WARN__"
+                return
+              }
+              EnqLog "⚠️ Continuando compresión sin respaldo SQLite por decisión del usuario."
+              $sqliteBackupPath = $null
+            }
+          }
           $sevenZip = Get-7ZipPath
           if (-not $sevenZip -or -not (Test-Path $sevenZip)) { EnqProg 0 "Error: no se encontró 7-Zip"; EnqLog "❌ No se encontró 7z.exe. No se puede comprimir."; EnqLog "__DONE_ERR__"; return }
           try {
             if (Test-Path $zipPath) { Remove-Item $zipPath -Force -ErrorAction SilentlyContinue }
             EnqProg 92 "Comprimiendo (ZIP)..."
-            if ($ZipPassword -and $ZipPassword.Trim().Length -gt 0) { & $sevenZip a -tzip -p"$($ZipPassword.Trim())" -mem=AES256 $zipPath $inputBak | Out-Null } else { & $sevenZip a -tzip $zipPath $inputBak | Out-Null }
+            $zipArgs = @("a", "-tzip")
+            if ($ZipPassword -and $ZipPassword.Trim().Length -gt 0) {
+              $zipArgs += "-p$($ZipPassword.Trim())"
+              $zipArgs += "-mem=AES256"
+            }
+            $zipArgs += $zipPath
+            $zipArgs += $inputBak
+            if ($sqliteBackupPath) { $zipArgs += $sqliteBackupPath }
+            & $sevenZip @zipArgs | Out-Null
             EnqProg 97 "Finalizando compresión..."
             Start-Sleep -Milliseconds 300
             if (Test-Path $zipPath) {
@@ -3992,7 +4062,7 @@ function Show-BackupDialog {
     $rs.Open()
     $ps = [PowerShell]::Create()
     $ps.Runspace = $rs
-    [void]$ps.AddScript($worker).AddArgument($Server).AddArgument($Database).AddArgument($BackupQuery).AddArgument($ScriptBackupPath).AddArgument($DoCompress).AddArgument($ZipPassword).AddArgument($Credential).AddArgument($DoCloudUpload).AddArgument($CloudWorkerUrl).AddArgument($CloudToken).AddArgument($LogQueue).AddArgument($ProgressQueue)
+    [void]$ps.AddScript($worker).AddArgument($Server).AddArgument($Database).AddArgument($BackupQuery).AddArgument($ScriptBackupPath).AddArgument($DoCompress).AddArgument($ZipPassword).AddArgument($Credential).AddArgument($IncludeSqliteBackup).AddArgument($SqliteOpsModulePath).AddArgument($DoCloudUpload).AddArgument($CloudWorkerUrl).AddArgument($CloudToken).AddArgument($LogQueue).AddArgument($ProgressQueue).AddArgument($PromptQueue)
     $null = $ps.BeginInvoke()
     Write-DzDebug "`t[DEBUG][Start-BackupWorkAsync] Worker lanzado"
   }
@@ -4020,7 +4090,8 @@ function Show-BackupDialog {
             $btnAceptar.Content = "Iniciar Respaldo"
             $txtNombre.IsEnabled = $true
             $chkComprimir.IsEnabled = $true
-            if ($chkComprimir.IsChecked -eq $true) { $txtPassword.IsEnabled = $true }
+            if ($chkComprimir.IsChecked -eq $true) { $txtPassword.IsEnabled = $true; $lblPassword.IsEnabled = $true }
+            Update-CloudUploadUI
             $btnAbrirCarpeta.IsEnabled = $true
             $tmp = $null
             while ($progressQueue.TryDequeue([ref]$tmp)) { }
@@ -4035,10 +4106,29 @@ function Show-BackupDialog {
               if ($script:LastDoneStatus -eq "OK") {
                 Ui-Info "Respaldo finalizado." "Información" $window
               } elseif ($script:LastDoneStatus -eq "WARN") {
-                Ui-Warn "Respaldo finalizado.`n`nTen en cuenta que a veces marca error de lectura porque es en un servidor (permisos/UNC). El backup pudo haberse generado en el servidor." "Atención" $window
+                Ui-Warn "Respaldo finalizado con advertencias.`n`nRevisa el log para ver el detalle. Si es servidor remoto, puede ser un tema de permisos/UNC y el backup pudo haberse generado en el servidor." "Atención" $window
               } else {
                 Ui-Error "Ocurrió un error durante el respaldo. Revisa el log." "Error" $window
               }
+            }
+          } elseif ($line -like "*__SQLITE_BACKUP_FAILED__*") {
+            $encodedMessage = ($line -replace '^.*__SQLITE_BACKUP_FAILED__', '').Trim()
+            $sqliteMessage = $encodedMessage
+            try {
+              $bytes = [Convert]::FromBase64String($encodedMessage)
+              $sqliteMessage = [System.Text.Encoding]::UTF8.GetString($bytes)
+            } catch {}
+            [void]$appendBuffer.AppendLine(("{0} ⚠️ Fallo al respaldar SQLite: {1}" -f (Get-Date -Format 'HH:mm:ss'), $sqliteMessage))
+            try {
+              $continueWithoutSqlite = Ui-Confirm "Fallo al respaldar SQLite:`n`n$sqliteMessage`n`n¿Quieres comprimir sin este archivo?" "Respaldar SQLite" $window
+              if ($continueWithoutSqlite) {
+                $promptQueue.Enqueue("YES")
+              } else {
+                $promptQueue.Enqueue("NO")
+              }
+            } catch {
+              Write-DzDebug "`t[DEBUG][UI] Error confirmando respaldo SQLite: $($_.Exception.Message)"
+              $promptQueue.Enqueue("NO")
             }
           } elseif ($line -like "*__CLOUD_LINK__*") {
             $cloudLink = $line -replace '^.*__CLOUD_LINK__', ''
@@ -4157,6 +4247,7 @@ Si solo necesitas crear el respaldo básico (.BAK), NO es necesario instalarlo.
       if (-not $logTimer.IsEnabled) { $logTimer.Start() }
       if (-not $logTimer.IsEnabled) { $logTimer.Start() }
       try {
+        $script:BackupRunning = $true
         $btnAceptar.IsEnabled = $false
         $btnAceptar.Content = "Procesando..."
         if ([string]::IsNullOrWhiteSpace($txtLog.Text)) {
@@ -4170,7 +4261,15 @@ Si solo necesitas crear el respaldo básico (.BAK), NO es necesario instalarlo.
         $txtProgress.Text = "Esperando..."
         $txtCloudLink.Text = ""
         $pnlCloudLink.Visibility = [System.Windows.Visibility]::Collapsed
+        $tmpPrompt = $null
+        while ($promptQueue.TryDequeue([ref]$tmpPrompt)) { }
         $cloudUpload = ($chkSubir.IsChecked -eq $true)
+        $includeSqliteBackup = ($chkIncludeSqlite.IsChecked -eq $true)
+        if ($includeSqliteBackup -and $chkComprimir.IsChecked -ne $true) {
+          Ui-Warn "El respaldo SQLite solo se puede incluir cuando la compresión está habilitada." "Compresión requerida" $window
+          Reset-BackupUI -ProgressText "Configura compresión"
+          return
+        }
         if ($cloudUpload -and $chkComprimir.IsChecked -ne $true) {
           Ui-Warn "La subida a nube solo está disponible para respaldos comprimidos." "Compresión requerida" $window
           Reset-BackupUI -ProgressText "Configura compresión"
@@ -4184,6 +4283,7 @@ Si solo necesitas crear el respaldo básico (.BAK), NO es necesario instalarlo.
         $cloudWorkerUrl = if ($cloudUpload) { Get-R2WorkerUrl } else { "" }
         $cloudToken = if ($cloudUpload) { [string]$pwdCloudSecret.Password } else { "" }
         Add-Log "Iniciando proceso de backup..."
+        if ($includeSqliteBackup) { Add-Log "SQLite será incluido en el ZIP." }
         if ($cloudUpload) { Add-Log "☁ Subida a nube habilitada." }
         Set-BackupOptionsExpanded -Expanded $false
         $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -4284,11 +4384,13 @@ WITH CHECKSUM, STATS = 1, FORMAT, INIT
 "@
         Paint-Progress -Percent 5 -Message "Conectando a SQL Server..."
         Write-DzDebug "`t[DEBUG][UI] Llamando Start-BackupWorkAsync"
-        Start-BackupWorkAsync -Server $Server -Database $Database -BackupQuery $backupQuery -ScriptBackupPath $scriptBackupPath -DoCompress ($chkComprimir.IsChecked -eq $true) -ZipPassword $txtPassword.Password -Credential $credential -DoCloudUpload $cloudUpload -CloudWorkerUrl $cloudWorkerUrl -CloudToken $cloudToken -LogQueue $logQueue -ProgressQueue $progressQueue
+        $sqliteOpsModulePath = Join-Path $PSScriptRoot "SqliteOps.psm1"
+        Start-BackupWorkAsync -Server $Server -Database $Database -BackupQuery $backupQuery -ScriptBackupPath $scriptBackupPath -DoCompress ($chkComprimir.IsChecked -eq $true) -ZipPassword $txtPassword.Password -Credential $credential -IncludeSqliteBackup $includeSqliteBackup -SqliteOpsModulePath $sqliteOpsModulePath -DoCloudUpload $cloudUpload -CloudWorkerUrl $cloudWorkerUrl -CloudToken $cloudToken -LogQueue $logQueue -ProgressQueue $progressQueue -PromptQueue $promptQueue
         $pwdCloudSecret.Password = ""
       } catch {
         Write-DzDebug "`t[DEBUG][UI] ERROR btnAceptar: $($_.Exception.Message)"
         Add-Log "❌ Error: $($_.Exception.Message)"
+        $script:BackupRunning = $false
         $btnAceptar.IsEnabled = $true
         $btnAceptar.Content = "Iniciar Respaldo"
         if ($timer -and $timer.IsEnabled) { $timer.Stop() }
@@ -4335,6 +4437,7 @@ function Reset-BackupUI {
   $txtNombre.IsEnabled = $true
   $chkComprimir.IsEnabled = $true
   if ($chkComprimir.IsChecked -eq $true) { $txtPassword.IsEnabled = $true; $lblPassword.IsEnabled = $true } else { $txtPassword.IsEnabled = $false; $lblPassword.IsEnabled = $false }
+  try { Update-CloudUploadUI } catch {}
   $btnAbrirCarpeta.IsEnabled = $true
   $txtProgress.Text = $ProgressText
 }
