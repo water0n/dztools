@@ -562,6 +562,90 @@ function New-DzMarkdownTableText {
     }
     return ($lines -join "`r`n")
 }
+function ConvertTo-DzHtmlTableText {
+    [CmdletBinding()]
+    param(
+        [Parameter()][AllowNull()]$Value,
+        [Parameter()][string]$NullText = ""
+    )
+    if ($null -eq $Value -or $Value -is [System.DBNull]) {
+        $text = $NullText
+    } elseif ($Value -is [datetime]) {
+        $text = ([datetime]$Value).ToString("yyyy-MM-dd HH:mm:ss.fff")
+    } elseif ($Value -is [bool]) {
+        if ($Value) { $text = "True" } else { $text = "False" }
+    } else {
+        $text = [string]$Value
+    }
+    $text = $text -replace "`t", " " -replace "`r`n", " " -replace "`n", " " -replace "`r", " "
+    return [System.Net.WebUtility]::HtmlEncode($text)
+}
+function New-DzHtmlTableFragment {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$Headers,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$Rows
+    )
+    if (-not $Headers -or $Headers.Count -eq 0) { return "" }
+    $tableStyle = "border-collapse:collapse;border-spacing:0;background:#ffffff;color:#111111;font-family:Segoe UI,Arial,sans-serif;font-size:12px;"
+    $thStyle = "border:1px solid #cfd7df;background:#f3f6f8;color:#111111;padding:4px 8px;text-align:left;font-weight:600;white-space:nowrap;"
+    $tdStyle = "border:1px solid #d8dee4;background:#ffffff;color:#111111;padding:4px 8px;text-align:left;white-space:nowrap;"
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.Append("<table style=""$tableStyle""><thead><tr>")
+    foreach ($header in $Headers) {
+        [void]$sb.Append("<th style=""$thStyle"">")
+        [void]$sb.Append((ConvertTo-DzHtmlTableText -Value $header -NullText ""))
+        [void]$sb.Append("</th>")
+    }
+    [void]$sb.Append("</tr></thead><tbody>")
+    foreach ($row in @($Rows)) {
+        [void]$sb.Append("<tr>")
+        for ($i = 0; $i -lt $Headers.Count; $i++) {
+            $value = $null
+            if ($row -is [array]) {
+                if ($i -lt $row.Count) { $value = $row[$i] }
+            } elseif ($row -is [System.Collections.IList]) {
+                if ($i -lt $row.Count) { $value = $row[$i] }
+            } elseif ($i -eq 0) {
+                $value = $row
+            }
+            [void]$sb.Append("<td style=""$tdStyle"">")
+            [void]$sb.Append((ConvertTo-DzHtmlTableText -Value $value -NullText "NULL"))
+            [void]$sb.Append("</td>")
+        }
+        [void]$sb.Append("</tr>")
+    }
+    [void]$sb.Append("</tbody></table>")
+    return $sb.ToString()
+}
+function New-DzClipboardHtmlFormat {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Fragment)
+    $prefix = "<html><body><!--StartFragment-->"
+    $suffix = "<!--EndFragment--></body></html>"
+    $html = $prefix + $Fragment + $suffix
+    $headerTemplate = "Version:0.9`r`nStartHTML:0000000000`r`nEndHTML:0000000000`r`nStartFragment:0000000000`r`nEndFragment:0000000000`r`n"
+    $encoding = [System.Text.Encoding]::UTF8
+    $startHtml = $encoding.GetByteCount($headerTemplate)
+    $startFragment = $startHtml + $encoding.GetByteCount($prefix)
+    $endFragment = $startFragment + $encoding.GetByteCount($Fragment)
+    $endHtml = $startHtml + $encoding.GetByteCount($html)
+    $header = "Version:0.9`r`nStartHTML:{0:D10}`r`nEndHTML:{1:D10}`r`nStartFragment:{2:D10}`r`nEndFragment:{3:D10}`r`n" -f $startHtml, $endHtml, $startFragment, $endFragment
+    return ($header + $html)
+}
+function Set-DzTableClipboard {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Text,
+        [Parameter(Mandatory = $true)][string]$HtmlFragment
+    )
+    $dataObject = New-Object System.Windows.DataObject
+    $dataObject.SetText($Text)
+    if (-not [string]::IsNullOrWhiteSpace($HtmlFragment)) {
+        $dataObject.SetData([System.Windows.DataFormats]::Html, (New-DzClipboardHtmlFormat -Fragment $HtmlFragment))
+    }
+    [System.Windows.Clipboard]::SetDataObject($dataObject, $true)
+}
 function Get-DzDataGridColumnHeaderText {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)]$Column)
@@ -1048,8 +1132,9 @@ function Show-MultipleResultSets {
                 if (-not $selection -or -not $selection.Headers -or $selection.Headers.Count -eq 0 -or -not $selection.Rows -or $selection.Rows.Count -eq 0) { return }
                 $textToCopy = & $module { param($headers, $rows) New-DzMarkdownTableText -Headers $headers -Rows $rows } $selection.Headers $selection.Rows
                 if ([string]::IsNullOrWhiteSpace($textToCopy)) { return }
-                [System.Windows.Clipboard]::SetText($textToCopy)
-                Write-DzDebug "`t[DEBUG][DataGrid] ✓ Copiado Markdown: $($selection.RowCount) filas × $($selection.ColumnCount) columnas"
+                $htmlFragment = & $module { param($headers, $rows) New-DzHtmlTableFragment -Headers $headers -Rows $rows } $selection.Headers $selection.Rows
+                & $module { param($text, $html) Set-DzTableClipboard -Text $text -HtmlFragment $html } $textToCopy $htmlFragment
+                Write-DzDebug "`t[DEBUG][DataGrid] ✓ Copiado Markdown/HTML: $($selection.RowCount) filas × $($selection.ColumnCount) columnas"
             } catch {
                 Write-DzDebug "`t[DEBUG][DataGrid] Error en copiar Markdown: $_" -Color Red
             }

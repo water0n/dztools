@@ -57,6 +57,36 @@ Describe "Database Markdown copy" {
             $lines[1] | Should -Be "| ---- | ----------------------- | ---- | ---- | ------------- |"
             $lines[2] | Should -Be "| NULL | 2026-06-05 07:08:09.123 | True | a\|b | line next end |"
         }
+
+        It "genera una tabla HTML para pegado rico sin fondo oscuro" {
+            $html = New-DzHtmlTableFragment -Headers @("FECHAREV", "estacion", "UltimoUso") -Rows @(
+                ,@("05/06/2026", "WIN-CV5M76SSQSM", "2026-06-22 23:21:16.000")
+                ,@("14/11/2025", "DESKTOP-G3MBH2U", "2026-05-02 23:29:10.000")
+            )
+
+            $html | Should -Match "<table"
+            $html | Should -Match "<th[^>]*>FECHAREV</th>"
+            $html | Should -Match "<td[^>]*>WIN-CV5M76SSQSM</td>"
+            $html | Should -Match "background:#ffffff"
+            $html | Should -Not -Match "background:#1"
+            $html | Should -Not -Match "background:#000"
+        }
+
+        It "escapa HTML en valores de tabla rica" {
+            $html = New-DzHtmlTableFragment -Headers @("a&b") -Rows @(,@("<x>|y"))
+
+            $html | Should -Match "a&amp;b"
+            $html | Should -Match "&lt;x&gt;\\|y"
+        }
+
+        It "crea formato CF_HTML para el portapapeles" {
+            $cfHtml = New-DzClipboardHtmlFormat -Fragment "<table><tr><td>x</td></tr></table>"
+
+            $cfHtml | Should -Match "^Version:0.9"
+            $cfHtml | Should -Match 'StartHTML:\d{10}'
+            $cfHtml | Should -Match "<!--StartFragment--><table>"
+            $cfHtml | Should -Match "</table><!--EndFragment-->"
+        }
     }
 
     It "expone la opcion en el menu contextual del DataGrid" {
@@ -65,6 +95,8 @@ Describe "Database Markdown copy" {
 
         $content | Should -Match "Copiar como Markdown"
         $content | Should -Match "New-DzMarkdownTableText"
+        $content | Should -Match "New-DzHtmlTableFragment"
+        $content | Should -Match "Set-DzTableClipboard"
         $content | Should -Match '\& \$module \{ param\(\$grid\) Get-DzDataGridSelectionTable'
     }
 }
