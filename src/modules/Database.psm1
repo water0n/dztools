@@ -1682,6 +1682,15 @@ function Get-ResultTabHeaderText {
     if (-not $TabItem) { return "Resultado" }
     $header = $TabItem.Header
     if ($header -is [System.Windows.Controls.TextBlock]) { return [string]$header.Text }
+    if ($header -is [System.Windows.Controls.StackPanel]) {
+        $texts = @()
+        foreach ($child in $header.Children) {
+            if ($child -is [System.Windows.Controls.TextBlock] -and -not [string]::IsNullOrWhiteSpace($child.Text)) {
+                $texts += [string]$child.Text
+            }
+        }
+        if ($texts.Count -gt 0) { return [string]$texts[-1] }
+    }
     if ($null -ne $header) { return [string]$header }
     return "Resultado"
 }

@@ -99,4 +99,22 @@ Describe "Database Markdown copy" {
         $content | Should -Match "Set-DzTableClipboard"
         $content | Should -Match '\& \$module \{ param\(\$grid\) Get-DzDataGridSelectionTable'
     }
+
+    It "lee el texto visible de headers StackPanel para exportar" {
+        $tab = New-Object System.Windows.Controls.TabItem
+        $panel = New-Object System.Windows.Controls.StackPanel
+        $panel.Orientation = "Horizontal"
+        $icon = New-Object System.Windows.Controls.TextBlock
+        $icon.Text = "icon"
+        $title = New-Object System.Windows.Controls.TextBlock
+        $title.Text = "Resultado 1 (2 filas)"
+        [void]$panel.Children.Add($icon)
+        [void]$panel.Children.Add($title)
+        $tab.Header = $panel
+
+        InModuleScope Database {
+            param($tabFromTest)
+            Get-ResultTabHeaderText -TabItem $tabFromTest | Should -Be "Resultado 1 (2 filas)"
+        } -ArgumentList $tab
+    }
 }
