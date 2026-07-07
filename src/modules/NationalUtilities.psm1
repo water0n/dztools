@@ -1,5 +1,106 @@
 ﻿#requires -Version 5.0
 #NationalUtilities.psm1 - Módulo de utilidades NS
+$script:DllRegistrationEditorAssemblyLoaded = $false
+$script:DllRegistrationEditorHighlighting = $null
+function Get-DllRegistrationEditorPaths {
+    $moduleRoot = Split-Path -Parent $PSScriptRoot
+    [pscustomobject]@{
+        AssemblyPath = Join-Path (Join-Path $moduleRoot "lib") "AvalonEdit.dll"
+    }
+}
+function Import-DllRegistrationAvalonEditAssembly {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$AssemblyPath
+    )
+    if ($script:DllRegistrationEditorAssemblyLoaded) { return }
+    if (-not (Test-Path -LiteralPath $AssemblyPath)) {
+        throw "No se encontró AvalonEdit.dll en '$AssemblyPath'."
+    }
+    Add-Type -Path $AssemblyPath
+    $script:DllRegistrationEditorAssemblyLoaded = $true
+}
+function Get-DllRegistrationEditorHighlighting {
+    [CmdletBinding()]
+    param()
+    if ($script:DllRegistrationEditorHighlighting) { return $script:DllRegistrationEditorHighlighting }
+    $paths = Get-DllRegistrationEditorPaths
+    Import-DllRegistrationAvalonEditAssembly -AssemblyPath $paths.AssemblyPath
+    $xshd = @'
+<?xml version="1.0" encoding="utf-8"?>
+<SyntaxDefinition name="DLL list" extensions=".dlllist"
+  xmlns="http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008">
+  <Color name="Comment" foreground="#6B7280" />
+  <RuleSet ignoreCase="false">
+    <Span color="Comment" begin="^\s*#" end="\n" />
+  </RuleSet>
+</SyntaxDefinition>
+'@
+    try {
+        $stringReader = [System.IO.StringReader]::new($xshd)
+        $reader = [System.Xml.XmlReader]::Create($stringReader)
+        try {
+            $script:DllRegistrationEditorHighlighting = [ICSharpCode.AvalonEdit.Highlighting.Xshd.HighlightingLoader]::Load(
+                $reader,
+                [ICSharpCode.AvalonEdit.Highlighting.HighlightingManager]::Instance
+            )
+        } finally {
+            $reader.Close()
+            $stringReader.Dispose()
+        }
+        return $script:DllRegistrationEditorHighlighting
+    } catch {
+        if (Get-Command Write-DzDebug -ErrorAction SilentlyContinue) {
+            Write-DzDebug "`t[DEBUG][Show-DllRegistrationDialog] Highlighting DLL inválido: $($_.Exception.Message)" Yellow
+        } else {
+            Write-Warning "Highlighting DLL inválido: $($_.Exception.Message)"
+        }
+        return $null
+    }
+}
+function New-DllRegistrationEditor {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][System.Windows.Controls.Border]$Container,
+        [Parameter()][string]$Text = "",
+        [Parameter()][hashtable]$Theme
+    )
+    $paths = Get-DllRegistrationEditorPaths
+    Import-DllRegistrationAvalonEditAssembly -AssemblyPath $paths.AssemblyPath
+
+    $editor = New-Object ICSharpCode.AvalonEdit.TextEditor
+    $brushConverter = [System.Windows.Media.BrushConverter]::new()
+    $controlBg = if ($Theme -and $Theme.ControlBackground) { $Theme.ControlBackground } else { "#FFFFFF" }
+    $controlFg = if ($Theme -and $Theme.ControlForeground) { $Theme.ControlForeground } else { "#111111" }
+    $selectionBg = if ($Theme -and $Theme.AccentPrimary) { $Theme.AccentPrimary } else { "#72A6F4" }
+    $selectionFg = if ($Theme -and $Theme.OnAccentForeground) { $Theme.OnAccentForeground } else { "#FFFFFF" }
+
+    $editor.ShowLineNumbers = $true
+    $editor.FontFamily = if ($Theme -and $Theme.CodeFontFamily) { $Theme.CodeFontFamily } else { "Consolas" }
+    $editor.FontSize = if ($Theme -and $Theme.CodeFontSize) { [double]$Theme.CodeFontSize } else { 12 }
+    $editor.HorizontalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
+    $editor.VerticalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
+    $editor.WordWrap = $false
+    $editor.Padding = [System.Windows.Thickness]::new(6, 4, 6, 4)
+    $editor.Background = $brushConverter.ConvertFromString($controlBg)
+    $editor.Foreground = $brushConverter.ConvertFromString($controlFg)
+    $editor.TextArea.SelectionBrush = $brushConverter.ConvertFromString($selectionBg)
+    $editor.TextArea.SelectionForeground = $brushConverter.ConvertFromString($selectionFg)
+    $editor.Options.ConvertTabsToSpaces = $true
+    $editor.Options.IndentationSize = 4
+    $editor.Options.EnableHyperlinks = $false
+    $editor.Options.EnableEmailHyperlinks = $false
+    $editor.Options.HighlightCurrentLine = $true
+    $editor.TextArea.TextView.CurrentLineBackground = $brushConverter.ConvertFromString("#2A2A2A")
+    if ($Theme -and $Theme.ControlBackground -eq "#FFFFFF") {
+        $editor.TextArea.TextView.CurrentLineBackground = $brushConverter.ConvertFromString("#F1F5F9")
+    }
+    $editor.TextArea.TextView.CurrentLineBorder = $null
+    $editor.SyntaxHighlighting = Get-DllRegistrationEditorHighlighting
+    $editor.Text = $Text
+    $Container.Child = $editor
+    return $editor
+}
 function Show-DllRegistrationDialog {
     [CmdletBinding()]
     param()
@@ -211,18 +312,13 @@ function Show-DllRegistrationDialog {
 
       <!-- Editor -->
       <Border Grid.Row="2"
+              Name="bdDllEditorHost"
               Background="{DynamicResource ControlBg}"
               BorderBrush="{DynamicResource BorderBrushColor}"
               BorderThickness="1"
               CornerRadius="10"
-              Padding="10"
-              Margin="12,0,12,10">
-        <RichTextBox Name="rtbDlls"
-                     VerticalScrollBarVisibility="Auto"
-                     Background="{DynamicResource ControlBg}"
-                     Foreground="{DynamicResource ControlFg}"
-                     BorderThickness="0"/>
-      </Border>
+              Padding="0"
+              Margin="12,0,12,10"/>
 
       <!-- Footer -->
       <Grid Grid.Row="3" Margin="12,0,12,12">
@@ -301,73 +397,17 @@ function Show-DllRegistrationDialog {
                     try { $w.Close() } catch {}
                 }
             })
-        $rtb = $c['rtbDlls']
-        $textRange = New-Object System.Windows.Documents.TextRange($rtb.Document.ContentStart, $rtb.Document.ContentEnd)
-        $textRange.Text = $defaultList
-        $script:dllFormatting = $false
-        $GetTextPointerFromOffset = {
-            param(
-                [System.Windows.Documents.FlowDocument]$Document,
-                [int]$Offset
-            )
-            $navigator = $Document.ContentStart
-            $count = 0
-            while ($navigator -ne $null) {
-                $context = $navigator.GetPointerContext([System.Windows.Documents.LogicalDirection]::Forward)
-                if ($context -eq [System.Windows.Documents.TextPointerContext]::Text) {
-                    $text = $navigator.GetTextInRun([System.Windows.Documents.LogicalDirection]::Forward)
-                    if (($count + $text.Length) -ge $Offset) { return $navigator.GetPositionAtOffset($Offset - $count) }
-                    $count += $text.Length
-                    $navigator = $navigator.GetPositionAtOffset($text.Length)
-                } else {
-                    $navigator = $navigator.GetNextContextPosition([System.Windows.Documents.LogicalDirection]::Forward)
-                }
-            }
-            return $Document.ContentEnd
-        }.GetNewClosure()
-        $applyHighlight = {
-            if ($script:dllFormatting) { return }
-            $script:dllFormatting = $true
-            try {
-                $caret = $rtb.CaretPosition
-
-                $range = New-Object System.Windows.Documents.TextRange(
-                    $rtb.Document.ContentStart,
-                    $rtb.Document.ContentEnd
-                )
-
-                $text = $range.Text -replace "`r", ""
-
-                $rtb.Document.Blocks.Clear()
-                $p = New-Object System.Windows.Documents.Paragraph
-                $p.Margin = "0"
-
-                foreach ($line in $text -split "`n", -1) {
-                    $run = New-Object System.Windows.Documents.Run($line)
-                    if ($line.TrimStart().StartsWith("#")) {
-                        $run.Foreground = [System.Windows.Media.Brushes]::Gray
-                    }
-                    $p.Inlines.Add($run)
-                    $p.Inlines.Add((New-Object System.Windows.Documents.LineBreak))
-                }
-
-                $rtb.Document.Blocks.Add($p)
-                $rtb.CaretPosition = $caret
-            } finally {
-                $script:dllFormatting = $false
-            }
-        }.GetNewClosure()
-
-        & $applyHighlight
-        $rtb.Add_TextChanged({ & $applyHighlight })
+        $editor = New-DllRegistrationEditor -Container $c['bdDllEditorHost'] -Text $defaultList -Theme $theme
+        $w.Add_Loaded({
+                try { $editor.Focus() | Out-Null } catch {}
+            }.GetNewClosure())
         $c['btnRun'].Add_Click({
                 Write-DzDebug "`t[DEBUG][Show-DllRegistrationDialog] Ejecutando registro"
                 if (-not (Test-Administrator)) {
                     Show-WpfMessageBox -Message "Esta acción requiere permisos de administrador." -Title "Permisos requeridos" -Buttons OK -Icon Warning | Out-Null
                     return
                 }
-                $range = New-Object System.Windows.Documents.TextRange($rtb.Document.ContentStart, $rtb.Document.ContentEnd)
-                $rawText = ($range.Text -replace "`r", "")
+                $rawText = ($editor.Text -replace "`r", "")
                 $lines = $rawText -split "`n"
                 $paths = @()
                 $currentDir = $null
