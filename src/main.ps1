@@ -71,7 +71,6 @@ $global:defaultInstructions = @"
 - Instalador de impresoras Generic Text por IP
 - Registro y deregistro de Dlls
 - Configuraciones de Firewall
-    * Buscar reglas existentes "deshabilitada termporalmente"
     * Agregar reglas nuevas
 - Nueva interfaz WPF
     * Fuentes y colores actualizados.
