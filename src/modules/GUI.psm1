@@ -27,6 +27,20 @@ function Get-DzUiTheme {
             AccentOrangeHover = "#D45200"
             AccentMagenta = "#DC267F"
             AccentMagentaHover = "#C21F72"
+            AccentAmber = "#F59E0B"
+            AccentAmberHover = "#D97706"
+            AccentIndigo = "#2563EB"
+            AccentIndigoHover = "#1D4ED8"
+            AccentCyan = "#06B6D4"
+            AccentCyanHover = "#0891B2"
+            AccentTeal = "#0D9488"
+            AccentTealHover = "#0F766E"
+            AccentPurple = "#8B5CF6"
+            AccentPurpleHover = "#7C3AED"
+            AccentRose = "#E11D48"
+            AccentRoseHover = "#BE123C"
+            AccentSlate = "#64748B"
+            AccentSlateHover = "#475569"
             AccentDatabase = "#A7C6DB"
             AccentDatabaseHover = "#93B4CC"
             OnAccentForeground = "#FFFFFF"
@@ -64,6 +78,20 @@ function Get-DzUiTheme {
             AccentOrangeHover = "#D45200"
             AccentMagenta = "#DC267F"
             AccentMagentaHover = "#C21F72"
+            AccentAmber = "#F59E0B"
+            AccentAmberHover = "#D97706"
+            AccentIndigo = "#2563EB"
+            AccentIndigoHover = "#1D4ED8"
+            AccentCyan = "#06B6D4"
+            AccentCyanHover = "#0891B2"
+            AccentTeal = "#0D9488"
+            AccentTealHover = "#0F766E"
+            AccentPurple = "#8B5CF6"
+            AccentPurpleHover = "#7C3AED"
+            AccentRose = "#E11D48"
+            AccentRoseHover = "#BE123C"
+            AccentSlate = "#64748B"
+            AccentSlateHover = "#475569"
             AccentDatabase = "#A7C6DB"
             AccentDatabaseHover = "#93B4CC"
             OnAccentForeground = "#FFFFFF"
@@ -153,6 +181,20 @@ function Set-DzWpfThemeResources {
     Set-BrushResource -Resources $Window.Resources -Key "AccentOrangeHover" -Hex $Theme.AccentOrangeHover
     Set-BrushResource -Resources $Window.Resources -Key "AccentMagenta" -Hex $Theme.AccentMagenta
     Set-BrushResource -Resources $Window.Resources -Key "AccentMagentaHover" -Hex $Theme.AccentMagentaHover
+    Set-BrushResource -Resources $Window.Resources -Key "AccentAmber" -Hex $Theme.AccentAmber
+    Set-BrushResource -Resources $Window.Resources -Key "AccentAmberHover" -Hex $Theme.AccentAmberHover
+    Set-BrushResource -Resources $Window.Resources -Key "AccentIndigo" -Hex $Theme.AccentIndigo
+    Set-BrushResource -Resources $Window.Resources -Key "AccentIndigoHover" -Hex $Theme.AccentIndigoHover
+    Set-BrushResource -Resources $Window.Resources -Key "AccentCyan" -Hex $Theme.AccentCyan
+    Set-BrushResource -Resources $Window.Resources -Key "AccentCyanHover" -Hex $Theme.AccentCyanHover
+    Set-BrushResource -Resources $Window.Resources -Key "AccentTeal" -Hex $Theme.AccentTeal
+    Set-BrushResource -Resources $Window.Resources -Key "AccentTealHover" -Hex $Theme.AccentTealHover
+    Set-BrushResource -Resources $Window.Resources -Key "AccentPurple" -Hex $Theme.AccentPurple
+    Set-BrushResource -Resources $Window.Resources -Key "AccentPurpleHover" -Hex $Theme.AccentPurpleHover
+    Set-BrushResource -Resources $Window.Resources -Key "AccentRose" -Hex $Theme.AccentRose
+    Set-BrushResource -Resources $Window.Resources -Key "AccentRoseHover" -Hex $Theme.AccentRoseHover
+    Set-BrushResource -Resources $Window.Resources -Key "AccentSlate" -Hex $Theme.AccentSlate
+    Set-BrushResource -Resources $Window.Resources -Key "AccentSlateHover" -Hex $Theme.AccentSlateHover
     Set-BrushResource -Resources $Window.Resources -Key "AccentDatabase" -Hex $Theme.AccentDatabase
     Set-BrushResource -Resources $Window.Resources -Key "AccentDatabaseHover" -Hex $Theme.AccentDatabaseHover
     Set-BrushResource -Resources $Window.Resources -Key "AccentGreen" -Hex $Theme.AccentGreen
@@ -1134,9 +1176,8 @@ function Get-MainWindowXaml {
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentPrimary}"/>
-                                <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
                                 <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentPrimary}"/>
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.96"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="Bd" Property="Opacity" Value="0.92"/>
@@ -1149,23 +1190,136 @@ function Get-MainWindowXaml {
                 </Setter.Value>
             </Setter>
         </Style>
-        <Style x:Key="Column1ButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource GeneralButtonStyle}">
+        <Style x:Key="ToolButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource GeneralButtonStyle}">
             <Setter Property="Background" Value="{DynamicResource AccentMagenta}"/>
             <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentMagenta}"/>
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
                     <Setter Property="Background" Value="{DynamicResource AccentMagentaHover}"/>
                     <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentMagentaHover}"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
+        <Style x:Key="Column1ButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource ToolButtonStyle}"/>
         <Style x:Key="SystemButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource GeneralButtonStyle}">
-            <Setter Property="Background" Value="{DynamicResource AccentBlue}"/>
-            <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
+            <Setter Property="Background" Value="{DynamicResource AccentAmber}"/>
+            <Setter Property="Foreground" Value="#111111"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentAmber}"/>
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource AccentBlueHover}"/>
+                    <Setter Property="Background" Value="{DynamicResource AccentAmberHover}"/>
+                    <Setter Property="Foreground" Value="#111111"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentAmberHover}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="SqlTaskButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource GeneralButtonStyle}">
+            <Setter Property="Background" Value="{DynamicResource AccentIndigo}"/>
+            <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentIndigo}"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentIndigoHover}"/>
                     <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentIndigoHover}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="PrinterButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource GeneralButtonStyle}">
+            <Setter Property="Background" Value="{DynamicResource AccentGreen}"/>
+            <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentGreen}"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentGreenHover}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentGreenHover}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="PermissionButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource GeneralButtonStyle}">
+            <Setter Property="Background" Value="{DynamicResource AccentAmber}"/>
+            <Setter Property="Foreground" Value="#111111"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentAmber}"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentAmberHover}"/>
+                    <Setter Property="Foreground" Value="#111111"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentAmberHover}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="PackageButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource GeneralButtonStyle}">
+            <Setter Property="Background" Value="{DynamicResource AccentPurple}"/>
+            <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentPurple}"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentPurpleHover}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentPurpleHover}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="NetworkButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource GeneralButtonStyle}">
+            <Setter Property="Background" Value="{DynamicResource AccentCyan}"/>
+            <Setter Property="Foreground" Value="#111111"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentCyan}"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentCyanHover}"/>
+                    <Setter Property="Foreground" Value="#111111"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentCyanHover}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="UserButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource GeneralButtonStyle}">
+            <Setter Property="Background" Value="{DynamicResource AccentDisconnectBlue}"/>
+            <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentDisconnectBlue}"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentDisconnectBlueHover}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentDisconnectBlueHover}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="SecurityButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource GeneralButtonStyle}">
+            <Setter Property="Background" Value="{DynamicResource AccentRose}"/>
+            <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentRose}"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentRoseHover}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentRoseHover}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="MonitorButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource GeneralButtonStyle}">
+            <Setter Property="Background" Value="{DynamicResource AccentSlate}"/>
+            <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentSlate}"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentSlateHover}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentSlateHover}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="SqliteButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource GeneralButtonStyle}">
+            <Setter Property="Background" Value="{DynamicResource AccentTeal}"/>
+            <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentTeal}"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentTealHover}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentTealHover}"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
@@ -1201,11 +1355,13 @@ function Get-MainWindowXaml {
         </Style>
         <Style x:Key="NationalSoftButtonStyle" TargetType="{x:Type Button}" BasedOn="{StaticResource GeneralButtonStyle}">
             <Setter Property="Background" Value="{DynamicResource AccentOrange}"/>
-            <Setter Property="Foreground" Value="{DynamicResource FormFg}"/>
+            <Setter Property="Foreground" Value="#111111"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentOrange}"/>
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
                     <Setter Property="Background" Value="{DynamicResource AccentOrangeHover}"/>
-                    <Setter Property="Foreground" Value="{DynamicResource FormFg}"/>
+                    <Setter Property="Foreground" Value="#111111"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentOrangeHover}"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
@@ -1285,37 +1441,37 @@ function Get-MainWindowXaml {
                         </Grid.ColumnDefinitions>
 
                         <StackPanel Grid.Column="0" Margin="0,0,10,0" VerticalAlignment="Top">
-                            <Button Content="Instalar Herramientas" Name="btnInstalarHerramientas" Margin="0,0,0,10" Style="{StaticResource Column1ButtonStyle}"/>
-                            <Button Content="Ejecutar ExpressProfiler" Name="btnProfiler" Margin="0,0,0,10" Style="{StaticResource Column1ButtonStyle}"/>
-                            <Button Content="Ejecutar Database4" Name="btnDatabase" Margin="0,0,0,10" Style="{StaticResource Column1ButtonStyle}"/>
-                            <Button Content="Ejecutar Manager" Name="btnSQLManager" Margin="0,0,0,10" Style="{StaticResource Column1ButtonStyle}"/>
-                            <Button Content="Ejecutar Management" Name="btnSQLManagement" Margin="0,0,0,10" Style="{StaticResource Column1ButtonStyle}"/>
-                            <Button Content="Printer Tools" Name="btnPrinterTool" Margin="0,0,0,10" Style="{StaticResource Column1ButtonStyle}"/>
-                            <Button Content="Clear AnyDesk" Name="btnClearAnyDesk" Style="{StaticResource Column1ButtonStyle}"/>
+                            <Button Content="🧰 Instalar Herramientas" Name="btnInstalarHerramientas" Margin="0,0,0,10" Style="{StaticResource ToolButtonStyle}"/>
+                            <Button Content="📈 Ejecutar ExpressProfiler" Name="btnProfiler" Margin="0,0,0,10" Style="{StaticResource PackageButtonStyle}"/>
+                            <Button Content="🗄️ Ejecutar Database4" Name="btnDatabase" Margin="0,0,0,10" Style="{StaticResource SqlTaskButtonStyle}"/>
+                            <Button Content="🛠️ Ejecutar Manager" Name="btnSQLManager" Margin="0,0,0,10" Style="{StaticResource SqlTaskButtonStyle}"/>
+                            <Button Content="🧑‍💻 Ejecutar Management" Name="btnSQLManagement" Margin="0,0,0,10" Style="{StaticResource SqlTaskButtonStyle}"/>
+                            <Button Content="🖨️ Printer Tools" Name="btnPrinterTool" Margin="0,0,0,10" Style="{StaticResource PrinterButtonStyle}"/>
+                            <Button Content="🧹 Clear AnyDesk" Name="btnClearAnyDesk" Style="{StaticResource SecurityButtonStyle}"/>
                         </StackPanel>
 
                         <StackPanel Grid.Column="1" Margin="0,0,10,0" VerticalAlignment="Top">
-                            <Button Content="Lector DP - Permisos" Name="btnLectorDPicacls" Margin="0,0,0,10" Style="{StaticResource SystemButtonStyle}"/>
-                            <Button Content="Buscar Instalador LZMA" Name="LZMAbtnBuscarCarpeta" Margin="0,0,0,10" Style="{StaticResource SystemButtonStyle}"/>
-                            <Button Content="Agregar IPs" Name="btnConfigurarIPs" Margin="0,0,0,10" Style="{StaticResource SystemButtonStyle}"/>
-                            <Button Content="Agregar usuario de Windows" Name="btnAddUser" Margin="0,0,0,10" Style="{StaticResource SystemButtonStyle}"/>
-                            <Button Content="Configuraciones de Firewall" Name="btnFirewallConfig" Margin="0,0,0,10" Style="{StaticResource SystemButtonStyle}"/>
-                            <Button Content="Actualizar datos del sistema" Name="btnForzarActualizacion" Margin="0,0,0,10" Style="{StaticResource SystemButtonStyle}"/>
-                            <Button Content="Mostrar Impresoras" Name="btnShowPrinters" Margin="0,0,0,10" Style="{StaticResource SystemButtonStyle}"/>
-                            <Button Content="Instalar impresora" Name="btnInstallPrinter" Margin="0,0,0,10" Style="{StaticResource SystemButtonStyle}"/>
-                            <Button Content="Limpia y Reinicia Cola de Impresión" Name="btnClearPrintJobs" Style="{StaticResource SystemButtonStyle}"/>
+                            <Button Content="🔐 Lector DP - Permisos" Name="btnLectorDPicacls" Margin="0,0,0,10" Style="{StaticResource PermissionButtonStyle}"/>
+                            <Button Content="📦 Buscar Instalador LZMA" Name="LZMAbtnBuscarCarpeta" Margin="0,0,0,10" Style="{StaticResource PackageButtonStyle}"/>
+                            <Button Content="🌐 Agregar IPs" Name="btnConfigurarIPs" Margin="0,0,0,10" Style="{StaticResource NetworkButtonStyle}"/>
+                            <Button Content="👤 Agregar usuario de Windows" Name="btnAddUser" Margin="0,0,0,10" Style="{StaticResource UserButtonStyle}"/>
+                            <Button Content="🛡️ Configuraciones de Firewall" Name="btnFirewallConfig" Margin="0,0,0,10" Style="{StaticResource SecurityButtonStyle}"/>
+                            <Button Content="🔄 Actualizar datos del sistema" Name="btnForzarActualizacion" Margin="0,0,0,10" Style="{StaticResource SqlTaskButtonStyle}"/>
+                            <Button Content="🖨️ Mostrar Impresoras" Name="btnShowPrinters" Margin="0,0,0,10" Style="{StaticResource PrinterButtonStyle}"/>
+                            <Button Content="➕🖨️ Instalar impresora" Name="btnInstallPrinter" Margin="0,0,0,10" Style="{StaticResource PrinterButtonStyle}"/>
+                            <Button Content="🧽 Limpia y Reinicia Cola de Impresión" Name="btnClearPrintJobs" Style="{StaticResource PrinterButtonStyle}"/>
                         </StackPanel>
 
                         <StackPanel Grid.Column="2" Margin="0,0,10,0" VerticalAlignment="Top">
-                            <Button Content="Aplicaciones National Soft" Name="btnAplicacionesNS" Margin="0,0,0,10" Style="{StaticResource NationalSoftButtonStyle}"/>
-                            <Button Content="Cambiar OTM a SQL/DBF" Name="btnCambiarOTM" Margin="0,0,0,10" Style="{StaticResource NationalSoftButtonStyle}"/>
-                            <Button Content="Permisos C:\NationalSoft" Name="btnCheckPermissions" Margin="0,0,0,10" Style="{StaticResource NationalSoftButtonStyle}"/>
-                            <Button Content="Creación de SRM APK" Name="btnCreateAPK" Margin="0,0,0,10" Style="{StaticResource NationalSoftButtonStyle}"/>
-                            <Button Content="Extractor de Instalador" Name="btnExtractInstaller" Margin="0,0,0,10" Style="{StaticResource NationalSoftButtonStyle}"/>
-                            <Button Content="Instaladores NS" Name="btnInstaladoresNS" Margin="0,0,0,10" Style="{StaticResource NationalSoftButtonStyle}"/>
-                            <Button Content="Registro de dlls" Name="btnRegisterDlls" Margin="0,0,0,10" Style="{StaticResource NationalSoftButtonStyle}"/>
-                            <Button Content="Log Monitor Servicios" Name="btnMonitorServiciosLog" Margin="0,0,0,10" Style="{StaticResource NationalSoftButtonStyle}"/>
-                            <Button Content="SQLite NSsync" Name="btndzSQLite" Style="{StaticResource NationalSoftButtonStyle}"/>
+                            <Button Content="🏢 Aplicaciones National Soft" Name="btnAplicacionesNS" Margin="0,0,0,10" Style="{StaticResource NationalSoftButtonStyle}"/>
+                            <Button Content="🔁 Cambiar OTM a SQL/DBF" Name="btnCambiarOTM" Margin="0,0,0,10" Style="{StaticResource SqlTaskButtonStyle}"/>
+                            <Button Content="🔐 Permisos C:\NationalSoft" Name="btnCheckPermissions" Margin="0,0,0,10" Style="{StaticResource SecurityButtonStyle}"/>
+                            <Button Content="📱 Creación de SRM APK" Name="btnCreateAPK" Margin="0,0,0,10" Style="{StaticResource PackageButtonStyle}"/>
+                            <Button Content="📤 Extractor de Instalador" Name="btnExtractInstaller" Margin="0,0,0,10" Style="{StaticResource PackageButtonStyle}"/>
+                            <Button Content="📦 Instaladores NS" Name="btnInstaladoresNS" Margin="0,0,0,10" Style="{StaticResource NationalSoftButtonStyle}"/>
+                            <Button Content="🧩 Registro de dlls" Name="btnRegisterDlls" Margin="0,0,0,10" Style="{StaticResource SecurityButtonStyle}"/>
+                            <Button Content="📜 Log Monitor Servicios" Name="btnMonitorServiciosLog" Margin="0,0,0,10" Style="{StaticResource MonitorButtonStyle}"/>
+                            <Button Content="🪶 SQLite NSsync" Name="btndzSQLite" Style="{StaticResource SqliteButtonStyle}"/>
                         </StackPanel>
 
                         <StackPanel Grid.Column="3" VerticalAlignment="Top">
