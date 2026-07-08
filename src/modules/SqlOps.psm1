@@ -3905,6 +3905,47 @@ function Show-BackupDialog {
         if ($cmd) { return $cmd.Source }
         $null
       }
+      function Format-CompressionElapsed {
+        param([TimeSpan]$Elapsed)
+        $totalSeconds = [int][math]::Floor($Elapsed.TotalSeconds)
+        if ($totalSeconds -lt 60) { return ("{0}s" -f $totalSeconds) }
+        $minutes = [int][math]::Floor($totalSeconds / 60)
+        $seconds = $totalSeconds % 60
+        if ($seconds -eq 0) { return ("{0}m" -f $minutes) }
+        return ("{0}m {1:00}s" -f $minutes, $seconds)
+      }
+      function ConvertTo-QuotedProcessArgument {
+        param([AllowNull()][string]$Argument)
+        if ($null -eq $Argument -or $Argument.Length -eq 0) { return '""' }
+        if ($Argument -notmatch '[\s"]') { return $Argument }
+        $sb = New-Object System.Text.StringBuilder
+        [void]$sb.Append('"')
+        $backslashes = 0
+        foreach ($ch in $Argument.ToCharArray()) {
+          if ($ch -eq '\') {
+            $backslashes++
+            continue
+          }
+          if ($ch -eq '"') {
+            if ($backslashes -gt 0) { [void]$sb.Append(('\' * ($backslashes * 2))) }
+            [void]$sb.Append('\"')
+            $backslashes = 0
+            continue
+          }
+          if ($backslashes -gt 0) {
+            [void]$sb.Append(('\' * $backslashes))
+            $backslashes = 0
+          }
+          [void]$sb.Append($ch)
+        }
+        if ($backslashes -gt 0) { [void]$sb.Append(('\' * ($backslashes * 2))) }
+        [void]$sb.Append('"')
+        $sb.ToString()
+      }
+      function ConvertTo-ProcessArgumentString {
+        param([string[]]$Arguments)
+        ($Arguments | ForEach-Object { ConvertTo-QuotedProcessArgument $_ }) -join ' '
+      }
       try {
         EnqLog "Enviando comando a SQL Server..."
         EnqProg 10 "Iniciando backup..."
@@ -4003,7 +4044,7 @@ function Show-BackupDialog {
           try {
             if (Test-Path $zipPath) { Remove-Item $zipPath -Force -ErrorAction SilentlyContinue }
             EnqProg 92 "Comprimiendo (ZIP)..."
-            $zipArgs = @("a", "-tzip")
+            $zipArgs = @("a", "-tzip", "-bso0", "-bsp0")
             if ($ZipPassword -and $ZipPassword.Trim().Length -gt 0) {
               $zipArgs += "-p$($ZipPassword.Trim())"
               $zipArgs += "-mem=AES256"
@@ -4011,14 +4052,58 @@ function Show-BackupDialog {
             $zipArgs += $zipPath
             $zipArgs += $inputBak
             if ($sqliteBackupPath) { $zipArgs += $sqliteBackupPath }
-            & $sevenZip @zipArgs | Out-Null
+            $compressionWatch = [System.Diagnostics.Stopwatch]::StartNew()
+            $proc = $null
+            try {
+              $psi = New-Object System.Diagnostics.ProcessStartInfo
+              $psi.FileName = $sevenZip
+              $psi.Arguments = ConvertTo-ProcessArgumentString -Arguments $zipArgs
+              $psi.UseShellExecute = $false
+              $psi.CreateNoWindow = $true
+              $proc = New-Object System.Diagnostics.Process
+              $proc.StartInfo = $psi
+              if (-not $proc.Start()) { throw "No se pudo iniciar 7-Zip." }
+              $nextHeartbeatSeconds = 30
+              while (-not $proc.WaitForExit(1000)) {
+                $elapsedSeconds = [int][math]::Floor($compressionWatch.Elapsed.TotalSeconds)
+                if ($elapsedSeconds -ge $nextHeartbeatSeconds) {
+                  $elapsedText = Format-CompressionElapsed -Elapsed $compressionWatch.Elapsed
+                  $sizeText = ""
+                  try {
+                    if (Test-Path -LiteralPath $zipPath -PathType Leaf) {
+                      $partialZipItem = Get-Item -LiteralPath $zipPath
+                      if ($partialZipItem.Length -gt 0) {
+                        $partialMB = [math]::Round($partialZipItem.Length / 1MB, 2)
+                        $sizeText = (", {0} MB escritos" -f $partialMB)
+                      }
+                    }
+                  } catch {
+                    $sizeText = ""
+                  }
+                  EnqProg 92 ("Comprimiendo ZIP... {0}" -f $elapsedText)
+                  EnqLog ("🗜️ Comprimiendo ZIP... {0} transcurridos{1}" -f $elapsedText, $sizeText)
+                  $nextHeartbeatSeconds += 30
+                }
+              }
+              $proc.WaitForExit()
+              if ($proc.ExitCode -ne 0) { throw "7-Zip terminó con código $($proc.ExitCode)." }
+            } catch {
+              if ($proc -and -not $proc.HasExited) {
+                try { $proc.Kill() } catch { [void]$_.Exception }
+              }
+              throw
+            } finally {
+              if ($compressionWatch) { $compressionWatch.Stop() }
+              if ($proc) { try { $proc.Dispose() } catch { [void]$_.Exception } }
+            }
             EnqProg 97 "Finalizando compresión..."
             Start-Sleep -Milliseconds 300
-            if (Test-Path $zipPath) {
-              $zipItem = Get-Item $zipPath
+            if (Test-Path -LiteralPath $zipPath -PathType Leaf) {
+              $zipItem = Get-Item -LiteralPath $zipPath
               $zipMB = [math]::Round($zipItem.Length / 1MB, 2)
+              $compressionElapsed = Format-CompressionElapsed -Elapsed $compressionWatch.Elapsed
               EnqProg 97 "ZIP creado."
-              EnqLog ("✅ ZIP creado ({0} MB): {1}" -f $zipMB, $zipPath)
+              EnqLog ("✅ ZIP creado ({0} MB, {1}): {2}" -f $zipMB, $compressionElapsed, $zipPath)
               EnqSep
               if ($DoCloudUpload) {
                 if ([string]::IsNullOrWhiteSpace($CloudWorkerUrl) -or [string]::IsNullOrWhiteSpace($CloudToken)) {
@@ -4041,8 +4126,18 @@ function Show-BackupDialog {
               } else {
                 EnqProg 99 "ZIP creado. Cerrando..."
               }
-            } else { EnqProg 0 "Error: ZIP no generado"; EnqLog ("❌ Se ejecutó 7-Zip pero NO se generó el ZIP: {0}" -f $zipPath) }
-          } catch { EnqProg 0 "Error al comprimir/subir"; EnqLog ("❌ Error al comprimir o subir: {0}" -f $_.Exception.Message) }
+            } else {
+              EnqProg 0 "Error: ZIP no generado"
+              EnqLog ("❌ Se ejecutó 7-Zip pero NO se generó el ZIP: {0}" -f $zipPath)
+              EnqLog "__DONE_ERR__"
+              return
+            }
+          } catch {
+            EnqProg 0 "Error al comprimir/subir"
+            EnqLog ("❌ Error al comprimir o subir: {0}" -f $_.Exception.Message)
+            EnqLog "__DONE_ERR__"
+            return
+          }
         }
         if ($DoCompress) {
           EnqLog "__DONE_OK__"
