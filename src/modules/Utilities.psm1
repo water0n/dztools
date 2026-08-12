@@ -47,6 +47,7 @@ function Ensure-DzUiConfig {
     $lines = New-Object System.Collections.Generic.List[string]
     $uiFound = $false
     $modeFound = $false
+    $stackedResultsFound = $false
     $inUiSection = $false
 
     foreach ($line in $content) {
@@ -66,10 +67,17 @@ function Ensure-DzUiConfig {
                 $lines.Add("mode=light")
                 $modeFound = $true
             }
+            if (-not $stackedResultsFound) {
+                $lines.Add("stacked_results=true")
+                $stackedResultsFound = $true
+            }
             $inUiSection = $false
         }
         if ($inUiSection -and $trimmed -match '^\s*mode\s*=\s*(.+)\s*$') {
             $modeFound = $true
+        }
+        if ($inUiSection -and $trimmed -match '^\s*stacked_results\s*=\s*(.+)\s*$') {
+            $stackedResultsFound = $true
         }
         $lines.Add($line)
     }
@@ -77,12 +85,16 @@ function Ensure-DzUiConfig {
     if ($uiFound -and -not $modeFound) {
         $lines.Add("mode=light")
     }
+    if ($uiFound -and -not $stackedResultsFound) {
+        $lines.Add("stacked_results=true")
+    }
     if (-not $uiFound) {
         if ($lines.Count -gt 0 -and $lines[$lines.Count - 1] -ne "") {
             $lines.Add("")
         }
         $lines.Add("[UI]")
         $lines.Add("mode=light")
+        $lines.Add("stacked_results=true")
     }
 
     Set-Content -LiteralPath $ConfigPath -Value $lines -Encoding UTF8
@@ -192,6 +204,26 @@ function Set-DzUiMode {
     )
     Update-DzIniSetting -Section "UI" -Key "mode" -Value $Mode
 }
+function Get-DzStackedResults {
+    $uiSettings = Get-DzIniSectionMap -Section "UI"
+    if (-not $uiSettings -or -not $uiSettings.ContainsKey("stacked_results")) {
+        return $true
+    }
+
+    $value = ([string]$uiSettings["stacked_results"]).Trim().ToLowerInvariant()
+    if ($value -match '^(false|0|no|off)$') { return $false }
+    if ($value -match '^(true|1|yes|on)$') { return $true }
+    return $true
+}
+function Set-DzStackedResults {
+    param(
+        [Parameter(Mandatory = $true)]
+        [bool]$Enabled
+    )
+
+    $value = if ($Enabled) { 'true' } else { 'false' }
+    Update-DzIniSetting -Section "UI" -Key "stacked_results" -Value $value
+}
 function Set-DzDebugPreference {
     param(
         [Parameter(Mandatory = $true)]
@@ -212,7 +244,7 @@ function Initialize-DzToolsConfig {
         New-Item -ItemType Directory -Path $configDir -Force | Out-Null
     }
     if (-not (Test-Path -LiteralPath $configPath)) {
-        "[desarrollo]`ndebug=false`n`n[UI]`nmode=light`n`n[sql]`n; server=user|password" | Out-File -FilePath $configPath -Encoding UTF8 -Force
+        "[desarrollo]`ndebug=false`n`n[UI]`nmode=light`nstacked_results=true`n`n[sql]`n; server=user|password" | Out-File -FilePath $configPath -Encoding UTF8 -Force
     }
     Ensure-DzUiConfig -ConfigPath $configPath
     $script:DzDebugEnabled = Get-DzDebugPreference
@@ -1900,7 +1932,7 @@ function Set-AdaptersToPrivate {
 }
 Export-ModuleMember -Function @(
     'Get-DzToolsConfigPath', 'Get-DzDebugPreference', 'Get-DzUiMode', 'Set-DzUiMode', 'Update-DzIniSetting',
-    'Set-DzDebugPreference', 'Initialize-DzToolsConfig', 'Get-DzIniSectionMap', 'Get-DzSavedSqlConnections',
+    'Get-DzStackedResults', 'Set-DzStackedResults', 'Set-DzDebugPreference', 'Initialize-DzToolsConfig', 'Get-DzIniSectionMap', 'Get-DzSavedSqlConnections',
     'Get-DzSavedSqlConnection', 'Save-DzSqlConnection', 'Write-DzDebug', 'Test-Administrator',
     'Get-SystemInfo', 'Clear-TemporaryFiles', 'Test-ChocolateyInstalled', 'Install-Chocolatey',
     'Get-AdminGroupName', 'Invoke-DiskCleanup', 'Stop-CleanmgrProcesses', 'Test-SameHost',

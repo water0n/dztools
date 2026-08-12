@@ -758,10 +758,12 @@ function Show-MultipleResultSets {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][System.Windows.Controls.TabControl]$TabControl,
-        [Parameter()][AllowEmptyCollection()][array]$ResultSets = @()
+        [Parameter()][AllowEmptyCollection()][array]$ResultSets = @(),
+        [Parameter()][bool]$Stacked = $false
     )
     Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] INICIO"
     Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] ResultSets Count: $($ResultSets.Count)"
+    Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Stacked: $Stacked"
     $messagesTab = $null
     $messagesTabIndex = -1
     for ($ti = 0; $ti -lt $TabControl.Items.Count; $ti++) {
@@ -933,27 +935,53 @@ function Show-MultipleResultSets {
     [void]$tNull.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.TextBlock]::BackgroundProperty, $nullBrush)))
     [void]$tNull.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.TextBlock]::ForegroundProperty, $nullFg)))
     [void]$textStyleBase.Triggers.Add($tNull)
+    $useStackedLayout = $Stacked -and $ResultSets.Count -gt 1
+    $stackPanel = $null
+    $scrollViewer = $null
+    if ($useStackedLayout) {
+        $stackPanel = New-Object System.Windows.Controls.StackPanel
+        $stackPanel.Orientation = "Vertical"
+        $stackPanel.Margin = "4"
+
+        $scrollViewer = New-Object System.Windows.Controls.ScrollViewer
+        $scrollViewer.VerticalScrollBarVisibility = "Auto"
+        $scrollViewer.HorizontalScrollBarVisibility = "Disabled"
+        $scrollViewer.Content = $stackPanel
+    }
+    $totalRows = 0
     $i = 0
     foreach ($rs in $ResultSets) {
         $i++
-        $tab = New-Object System.Windows.Controls.TabItem
         $rowCount = if ($rs.RowCount -ne $null) { $rs.RowCount } else { $rs.DataTable.Rows.Count }
-        $headerPanel = New-Object System.Windows.Controls.StackPanel
-        $headerPanel.Orientation = "Horizontal"
-        $iconText = New-Object System.Windows.Controls.TextBlock
-        #dgResults construyendo la pestaña de resultados:
-        $iconText.Text = "📊"
-        $iconText.Margin = "0,0,6,0"
-        $iconText.FontSize = 10
-        $iconText.Margin = "0,0,4,0"
-        $titleText = New-Object System.Windows.Controls.TextBlock
-        $titleText.Text = "Resultado $i ($rowCount filas)"
-        $titleText.VerticalAlignment = "Center"
-        $titleText.FontSize = 10
-        $titleText.Margin = "0"
-        [void]$headerPanel.Children.Add($iconText)
-        [void]$headerPanel.Children.Add($titleText)
-        $tab.Header = $headerPanel
+        $totalRows += $rowCount
+        $tab = $null
+        if (-not $useStackedLayout) {
+            $tab = New-Object System.Windows.Controls.TabItem
+            $headerPanel = New-Object System.Windows.Controls.StackPanel
+            $headerPanel.Orientation = "Horizontal"
+            $iconText = New-Object System.Windows.Controls.TextBlock
+            #dgResults construyendo la pestaña de resultados:
+            $iconText.Text = "📊"
+            $iconText.Margin = "0,0,6,0"
+            $iconText.FontSize = 10
+            $iconText.Margin = "0,0,4,0"
+            $titleText = New-Object System.Windows.Controls.TextBlock
+            $titleText.Text = if ($ResultSets.Count -eq 1) { "Resultado ($rowCount filas)" } else { "Resultado $i ($rowCount filas)" }
+            $titleText.VerticalAlignment = "Center"
+            $titleText.FontSize = 10
+            $titleText.Margin = "0"
+            [void]$headerPanel.Children.Add($iconText)
+            [void]$headerPanel.Children.Add($titleText)
+            $tab.Header = $headerPanel
+        } else {
+            $headerLabel = New-Object System.Windows.Controls.TextBlock
+            $headerLabel.Text = "📊 Resultado $i ($rowCount filas)"
+            $headerLabel.FontWeight = "SemiBold"
+            $headerLabel.FontSize = 11
+            $headerLabel.Margin = if ($i -gt 1) { "4,12,4,4" } else { "4,4,4,4" }
+            $headerLabel.Foreground = $headerFg
+            [void]$stackPanel.Children.Add($headerLabel)
+        }
         $dg = New-Object System.Windows.Controls.DataGrid
         $dg.AutoGenerateColumns = $true
         $dg.ItemsSource = $rs.DataTable.DefaultView
@@ -985,6 +1013,12 @@ function Show-MultipleResultSets {
         $dg.ColumnHeaderStyle = $hdrStyle
         $dg.RowHeaderStyle = $rowHdrStyle
         $dg.CellStyle = $cellStyle
+        $dg.Tag = [pscustomobject]@{
+            Type         = 'DzResultDataGrid'
+            ResultIndex  = $i
+            DisplayShort = if ($ResultSets.Count -eq 1) { "Resultado" } else { "Resultado $i" }
+            RowCount     = $rowCount
+        }
         $dg.Add_LoadingRow({
                 param($s, $e)
                 try {
@@ -1314,18 +1348,52 @@ function Show-MultipleResultSets {
                         }, [System.Windows.Threading.DispatcherPriority]::Loaded) | Out-Null
                 } catch { }
             })
-        $tab.Content = $dg
+        if ($useStackedLayout) {
+            $dg.MinHeight = 150
+            $dg.MaxHeight = 400
+            $dg.Margin = "4,0,4,10"
+            [void]$stackPanel.Children.Add($dg)
+            Write-Host "`tResultado $i apilado con $rowCount filas" -ForegroundColor Green
+        } else {
+            $tab.Content = $dg
+            if ($permanentTabIndex -ge 0) {
+                $TabControl.Items.Insert($i - 1, $tab)
+                Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña $i insertada en índice $($i-1) (antes de pestañas fijas)"
+            } else {
+                [void]$TabControl.Items.Add($tab)
+                Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña $i agregada (no hay pestañas fijas)"
+            }
+            Write-Host "`tPestaña $i creada con $rowCount filas" -ForegroundColor Green
+        }
+    }
+    if ($useStackedLayout) {
+        $tab = New-Object System.Windows.Controls.TabItem
+        $headerPanel = New-Object System.Windows.Controls.StackPanel
+        $headerPanel.Orientation = "Horizontal"
+        $iconText = New-Object System.Windows.Controls.TextBlock
+        $iconText.Text = "📊"
+        $iconText.Margin = "0,0,4,0"
+        $iconText.FontSize = 10
+        $titleText = New-Object System.Windows.Controls.TextBlock
+        $titleText.Text = "Resultados ($($ResultSets.Count) sets, $totalRows filas)"
+        $titleText.VerticalAlignment = "Center"
+        $titleText.FontSize = 10
+        $titleText.Margin = "0"
+        [void]$headerPanel.Children.Add($iconText)
+        [void]$headerPanel.Children.Add($titleText)
+        $tab.Header = $headerPanel
+        $tab.Content = $scrollViewer
+
         if ($permanentTabIndex -ge 0) {
-            $TabControl.Items.Insert($i - 1, $tab)
-            Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña $i insertada en índice $($i-1) (antes de pestañas fijas)"
+            $TabControl.Items.Insert($permanentTabIndex, $tab)
+            Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña apilada insertada antes de pestañas fijas"
         } else {
             [void]$TabControl.Items.Add($tab)
-            Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña $i agregada (no hay pestañas fijas)"
+            Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña apilada agregada (no hay pestañas fijas)"
         }
-        Write-Host "`tPestaña $i creada con $rowCount filas" -ForegroundColor Green
+        Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Modo apilado: $($ResultSets.Count) grids en 1 pestaña"
     }
     if ($global:lblRowCount) {
-        $totalRows = ($ResultSets | Measure-Object -Property RowCount -Sum).Sum
         if ($ResultSets.Count -eq 1) {
             $global:lblRowCount.Text = "📊 $totalRows"
         } else {
@@ -1700,24 +1768,53 @@ function Get-ExportableResultTabs {
     if (-not $TabControl) { return $exportable }
     foreach ($item in $TabControl.Items) {
         if ($item -isnot [System.Windows.Controls.TabItem]) { continue }
-        $dg = $item.Content
-        if ($dg -isnot [System.Windows.Controls.DataGrid]) { continue }
-        $dt = $null
-        if ($dg.ItemsSource -is [System.Data.DataView]) {
-            $dt = $dg.ItemsSource.Table
-        } elseif ($dg.ItemsSource -is [System.Data.DataTable]) {
-            $dt = $dg.ItemsSource
-        } else {
-            try { $dt = $dg.ItemsSource.Table } catch { $dt = $null }
-        }
-        if (-not $dt -or -not $dt.Rows -or $dt.Rows.Count -lt 1) { continue }
         $headerText = Get-ResultTabHeaderText -TabItem $item
-        $exportable += [pscustomobject]@{
-            Tab          = $item
-            DataTable    = $dt
-            RowCount     = $dt.Rows.Count
-            Display      = "$headerText ($($dt.Rows.Count) filas)"
-            DisplayShort = $headerText
+        $dataGrids = @()
+
+        if ($item.Content -is [System.Windows.Controls.DataGrid]) {
+            $dataGrids += $item.Content
+        } elseif ($item.Content -is [System.Windows.Controls.ScrollViewer]) {
+            $content = $item.Content.Content
+            if ($content -is [System.Windows.Controls.Panel]) {
+                foreach ($child in $content.Children) {
+                    if ($child -is [System.Windows.Controls.DataGrid]) {
+                        $dataGrids += $child
+                    }
+                }
+            }
+        }
+
+        $gridIndex = 0
+        foreach ($dg in $dataGrids) {
+            $gridIndex++
+            $dt = $null
+            if ($dg.ItemsSource -is [System.Data.DataView]) {
+                $dt = $dg.ItemsSource.Table
+            } elseif ($dg.ItemsSource -is [System.Data.DataTable]) {
+                $dt = $dg.ItemsSource
+            } else {
+                try { $dt = $dg.ItemsSource.Table } catch { $dt = $null }
+            }
+            if (-not $dt -or -not $dt.Rows -or $dt.Rows.Count -lt 1) { continue }
+
+            $displayShort = $headerText
+            try {
+                if ($dg.Tag -and $dg.Tag.DisplayShort) {
+                    $displayShort = [string]$dg.Tag.DisplayShort
+                } elseif ($dataGrids.Count -gt 1) {
+                    $displayShort = "$headerText - Resultado $gridIndex"
+                }
+            } catch {
+                $displayShort = $headerText
+            }
+
+            $exportable += [pscustomobject]@{
+                Tab          = $item
+                DataTable    = $dt
+                RowCount     = $dt.Rows.Count
+                Display      = "$displayShort ($($dt.Rows.Count) filas)"
+                DisplayShort = $displayShort
+            }
         }
     }
     return $exportable

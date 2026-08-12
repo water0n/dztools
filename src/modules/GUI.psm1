@@ -1652,6 +1652,14 @@ function Get-MainWindowXaml {
                                             Style="{StaticResource DatabaseButtonStyle}"
                                             IsEnabled="False" FontSize="11"/>
 
+                                    <!-- Modo de resultados -->
+                                    <CheckBox Name="chkStackedResults"
+                                            Content="📊 Resultados en una pestaña"
+                                            IsChecked="True"
+                                            FontSize="10"
+                                            Margin="0,0,0,8"
+                                            ToolTip="Habilitado: muestra todos los resultados apilados en una sola pestaña. Deshabilitado: cada resultado en una pestaña separada."/>
+
                                     <!-- Queries Predefinidas -->
                                     <TextBlock Text="Queries:" FontSize="10" Margin="0,0,0,2"/>
                                     <ComboBox Name="cmbQueries"

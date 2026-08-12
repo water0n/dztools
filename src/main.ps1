@@ -184,6 +184,7 @@ function New-MainForm {
     $panelSsmsContent = $window.FindName("panelSsmsContent")
     $tglDarkMode = $window.FindName("tglDarkMode")
     $tglDebugMode = $window.FindName("tglDebugMode")
+    $chkStackedResults = $window.FindName("chkStackedResults")
     $script:predefinedQueries = Get-PredefinedQueries
     #Sirveaun?
     $script:sqlKeywords = 'ADD|ALL|ALTER|AND|ANY|AS|ASC|AUTHORIZATION|BACKUP|BETWEEN|BIGINT|BINARY|BIT|BY|CASE|CHECK|COLUMN|CONSTRAINT|CREATE|CROSS|CURRENT_DATE|CURRENT_TIME|CURRENT_TIMESTAMP|DATABASE|DEFAULT|DELETE|DESC|DISTINCT|DROP|EXEC|EXECUTE|EXISTS|FOREIGN|FROM|FULL|FUNCTION|GROUP|HAVING|IN|INDEX|INNER|INSERT|INT|INTO|IS|JOIN|KEY|LEFT|LIKE|LIMIT|NOT|NULL|ON|OR|ORDER|OUTER|PRIMARY|PROCEDURE|REFERENCES|RETURN|RIGHT|ROWNUM|SELECT|SET|SMALLINT|TABLE|TOP|TRUNCATE|UNION|UNIQUE|UPDATE|VALUES|VIEW|WHERE|WITH|RESTORE'
@@ -283,6 +284,7 @@ function New-MainForm {
     $global:btnConnectDb = $btnConnectDb
     $global:btnDisconnectDb = $btnDisconnectDb
     $global:btnExecute = $btnExecute
+    $global:chkStackedResults = $chkStackedResults
     $global:btnClearQuery = $btnClearQuery
     $global:btnExport = $btnExport
     $global:btnHistorial = $btnHistorial
@@ -360,6 +362,7 @@ function New-MainForm {
     $script:initializingToggles = $true
     if ($tglDarkMode) { $tglDarkMode.IsChecked = ((Get-DzUiMode) -eq 'dark') }
     if ($tglDebugMode) { $tglDebugMode.IsChecked = (Get-DzDebugPreference) }
+    if ($chkStackedResults) { $chkStackedResults.IsChecked = (Get-DzStackedResults) }
     $script:initializingToggles = $false
     $script:setInstructionText = {
         param([string]$Message)
@@ -396,6 +399,18 @@ function New-MainForm {
                 if ($script:initializingToggles) { return }
                 Set-DzDebugPreference -Enabled $false
                 Write-Host "[DEBUG] Desactivado" -ForegroundColor DarkGray
+            })
+    }
+    if ($chkStackedResults) {
+        $chkStackedResults.Add_Checked({
+                if ($script:initializingToggles) { return }
+                Set-DzStackedResults -Enabled $true
+                Write-DzDebug "`t[DEBUG] Resultados apilados: habilitado"
+            })
+        $chkStackedResults.Add_Unchecked({
+                if ($script:initializingToggles) { return }
+                Set-DzStackedResults -Enabled $false
+                Write-DzDebug "`t[DEBUG] Resultados apilados: deshabilitado"
             })
     }
     $global:txt_AdapterStatus = $txt_AdapterStatus

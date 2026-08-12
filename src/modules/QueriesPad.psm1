@@ -791,7 +791,8 @@ function Execute-QueryCore {
                     if ([string]::IsNullOrWhiteSpace($msg)) { $msg = "Error desconocido al ejecutar la consulta." }
                     if ($result -and $result.ResultSets -and $result.ResultSets.Count -gt 0) {
                         try {
-                            Show-MultipleResultSets -TabControl $global:tcResults -ResultSets $result.ResultSets
+                            $isStacked = if ($global:chkStackedResults) { $global:chkStackedResults.IsChecked -eq $true } else { $false }
+                            Show-MultipleResultSets -TabControl $global:tcResults -ResultSets $result.ResultSets -Stacked $isStacked
                             if ($global:txtMessages) {
                                 $currentText = $global:txtMessages.Text
                                 $global:txtMessages.Text = "ERROR: $msg`n`n$currentText"
@@ -818,7 +819,8 @@ function Execute-QueryCore {
                     } catch {}
                 }
                 if ($result.ResultSets -and $result.ResultSets.Count -gt 0) {
-                    try { Show-MultipleResultSets -TabControl $global:tcResults -ResultSets $result.ResultSets } catch {
+                    $isStacked = if ($global:chkStackedResults) { $global:chkStackedResults.IsChecked -eq $true } else { $false }
+                    try { Show-MultipleResultSets -TabControl $global:tcResults -ResultSets $result.ResultSets -Stacked $isStacked } catch {
                         if ($global:txtMessages) { $global:txtMessages.Text = "Error mostrando resultados: $($_.Exception.Message)" }
                     }
                     return
@@ -851,7 +853,6 @@ function Execute-QueryCore {
                     return
                 }
                 Show-MultipleResultSets -TabControl $global:tcResults -ResultSets @()
-                if ($global:lblRowCount) { $global:lblRowCount.Text = "Filas: 0" }
             } catch {
                 $err = "[UI][QueryDoneTimer ERROR] $($_.Exception.Message)`n$($_.ScriptStackTrace)"
                 if ($global:txtMessages) { $global:txtMessages.Text = $err }
