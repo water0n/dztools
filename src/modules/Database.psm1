@@ -949,6 +949,7 @@ function Show-MultipleResultSets {
         $rowCount = if ($rs.RowCount -ne $null) { $rs.RowCount } else { $rs.DataTable.Rows.Count }
         $totalRows += $rowCount
         $tab = $null
+        $resultPanel = $null
         if (-not $useStackedLayout) {
             $tab = New-Object System.Windows.Controls.TabItem
             $headerPanel = New-Object System.Windows.Controls.StackPanel
@@ -968,24 +969,31 @@ function Show-MultipleResultSets {
             [void]$headerPanel.Children.Add($titleText)
             $tab.Header = $headerPanel
         } else {
+            $resultPanelRow = New-Object System.Windows.Controls.RowDefinition
+            $resultPanelRow.Height = [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Star)
+            $resultPanelRow.MinHeight = 120
+            [void]$stackGrid.RowDefinitions.Add($resultPanelRow)
+
+            $resultPanel = New-Object System.Windows.Controls.Grid
+            $resultPanel.Margin = if ($i -gt 1) { "0,4,0,0" } else { "0" }
+
             $headerRow = New-Object System.Windows.Controls.RowDefinition
             $headerRow.Height = "Auto"
-            [void]$stackGrid.RowDefinitions.Add($headerRow)
+            [void]$resultPanel.RowDefinitions.Add($headerRow)
 
             $gridRow = New-Object System.Windows.Controls.RowDefinition
             $gridRow.Height = [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Star)
             $gridRow.MinHeight = 80
-            [void]$stackGrid.RowDefinitions.Add($gridRow)
+            [void]$resultPanel.RowDefinitions.Add($gridRow)
 
             $headerLabel = New-Object System.Windows.Controls.TextBlock
             $headerLabel.Text = "📊 Resultado $i ($rowCount filas)"
             $headerLabel.FontWeight = "SemiBold"
             $headerLabel.FontSize = 11
-            $headerLabel.Margin = if ($i -gt 1) { "4,12,4,4" } else { "4,4,4,4" }
+            $headerLabel.Margin = "4,4,4,4"
             $headerLabel.Foreground = $headerFg
-            [System.Windows.Controls.Grid]::SetRow($headerLabel, $stackRowIndex)
-            [void]$stackGrid.Children.Add($headerLabel)
-            $stackRowIndex++
+            [System.Windows.Controls.Grid]::SetRow($headerLabel, 0)
+            [void]$resultPanel.Children.Add($headerLabel)
         }
         $dg = New-Object System.Windows.Controls.DataGrid
         $dg.AutoGenerateColumns = $true
@@ -1356,8 +1364,11 @@ function Show-MultipleResultSets {
         if ($useStackedLayout) {
             $dg.MinHeight = 80
             $dg.Margin = "4,0,4,4"
-            [System.Windows.Controls.Grid]::SetRow($dg, $stackRowIndex)
-            [void]$stackGrid.Children.Add($dg)
+            [System.Windows.Controls.Grid]::SetRow($dg, 1)
+            [void]$resultPanel.Children.Add($dg)
+
+            [System.Windows.Controls.Grid]::SetRow($resultPanel, $stackRowIndex)
+            [void]$stackGrid.Children.Add($resultPanel)
             $stackRowIndex++
 
             if ($i -lt $ResultSets.Count) {
@@ -1787,6 +1798,33 @@ function Get-ResultTabHeaderText {
     if ($null -ne $header) { return [string]$header }
     return "Resultado"
 }
+function Get-DzDataGridsFromElement {
+    param($Element)
+
+    $dataGrids = @()
+    if (-not $Element) { return $dataGrids }
+
+    if ($Element -is [System.Windows.Controls.DataGrid]) {
+        return @($Element)
+    }
+
+    if ($Element -is [System.Windows.Controls.ScrollViewer]) {
+        return @(Get-DzDataGridsFromElement -Element $Element.Content)
+    }
+
+    if ($Element -is [System.Windows.Controls.Panel]) {
+        foreach ($child in $Element.Children) {
+            $dataGrids += @(Get-DzDataGridsFromElement -Element $child)
+        }
+        return $dataGrids
+    }
+
+    if ($Element -is [System.Windows.Controls.ContentControl] -and $Element.Content) {
+        return @(Get-DzDataGridsFromElement -Element $Element.Content)
+    }
+
+    return $dataGrids
+}
 function Get-ExportableResultTabs {
     param([System.Windows.Controls.TabControl]$TabControl)
     $exportable = @()
@@ -1794,26 +1832,7 @@ function Get-ExportableResultTabs {
     foreach ($item in $TabControl.Items) {
         if ($item -isnot [System.Windows.Controls.TabItem]) { continue }
         $headerText = Get-ResultTabHeaderText -TabItem $item
-        $dataGrids = @()
-
-        if ($item.Content -is [System.Windows.Controls.DataGrid]) {
-            $dataGrids += $item.Content
-        } elseif ($item.Content -is [System.Windows.Controls.Panel]) {
-            foreach ($child in $item.Content.Children) {
-                if ($child -is [System.Windows.Controls.DataGrid]) {
-                    $dataGrids += $child
-                }
-            }
-        } elseif ($item.Content -is [System.Windows.Controls.ScrollViewer]) {
-            $content = $item.Content.Content
-            if ($content -is [System.Windows.Controls.Panel]) {
-                foreach ($child in $content.Children) {
-                    if ($child -is [System.Windows.Controls.DataGrid]) {
-                        $dataGrids += $child
-                    }
-                }
-            }
-        }
+        $dataGrids = @(Get-DzDataGridsFromElement -Element $item.Content)
 
         $gridIndex = 0
         foreach ($dg in $dataGrids) {
