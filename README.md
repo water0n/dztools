@@ -30,10 +30,19 @@ Suite de utilidades para soporte tecnico, administracion de Windows y operacione
 - Deteccion y consulta de puertos SQL.
 - Acceso a herramientas relacionadas como SQL Server Management Studio, SQL Server Manager, Database4 y ExpressProfiler cuando estan disponibles.
 
+### Asistente de Inteligencia Artificial (Gemini)
+
+- Integracion nativa con la API de Google Gemini.
+- Generacion de consultas SQL a partir de lenguaje natural, analizando el contexto y esquema de tu base de datos.
+- Explicacion detallada de consultas complejas de manera automatica.
+- Interpretacion y explicacion de mensajes de error de SQL para facilitar el diagnostico.
+- Gestion integrada de API Key para mantener tu sesion y datos seguros.
+
 ### Operaciones de bases de datos
 
-- Respaldo de bases de datos.
+- Respaldo de bases de datos locales y opcionalmente de bases de datos SQLite asociadas.
 - Compresion opcional de respaldos con 7-Zip y contrasena.
+- Opcion de subida automatica de los respaldos comprimidos a la nube (Cloudflare R2), con generacion de enlaces directos.
 - Restauracion de respaldos con seleccion de rutas logicas.
 - Adjuntar bases de datos desde archivos MDF/LDF.
 - Separar bases de datos.
@@ -74,6 +83,7 @@ Suite de utilidades para soporte tecnico, administracion de Windows y operacione
 ### Utilidades NationalSoft
 
 - Reporte de aplicaciones NationalSoft desde INI.
+- Sincronizacion y operaciones con bases de datos locales usando SQLite NSsync.
 - Cambio de configuracion OTM entre SQL y DBF.
 - Validacion y correccion de permisos en `C:\NationalSoft`.
 - Registro y desregistro de DLLs con `regsvr32`.
