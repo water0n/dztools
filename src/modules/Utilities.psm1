@@ -750,7 +750,13 @@ function Install-7ZipWithChoco {
         choco install 7zip -y --no-progress | Out-Null
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
         Start-Sleep -Seconds 2
-        return (Test-7ZipInstalled)
+        $installed = Test-7ZipInstalled
+        if ($installed) {
+            Write-Host "Instalación terminada" -ForegroundColor Green
+        } else {
+            Write-Host "Instalación terminada, pero no se pudo confirmar 7zip." -ForegroundColor Yellow
+        }
+        return $installed
     } catch {
         Write-Host "Error instalando 7zip: $_" -ForegroundColor Red
         return $false
