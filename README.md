@@ -1,6 +1,6 @@
 # Gerardo Zermeno Tools (dztools)
 
-[![CI](https://github.com/water0ff/dztools/actions/workflows/ci.yml/badge.svg)](https://github.com/water0ff/dztools/actions/workflows/ci.yml)
+[![CI](https://github.com/water0n/dztools/actions/workflows/ci.yml/badge.svg)](https://github.com/water0n/dztools/actions/workflows/ci.yml)
 
 Suite de utilidades para soporte tecnico, administracion de Windows y operaciones comunes con SQL Server. La aplicacion esta construida en PowerShell 5 con interfaz WPF y agrupa herramientas que normalmente se ejecutan por separado: diagnostico del equipo, gestion de conexiones SQL, consultas, respaldos, restauraciones, impresoras, firewall, instaladores y utilidades para entornos NationalSoft.
 
@@ -186,7 +186,7 @@ dztools/
 Clona el repositorio:
 
 ```powershell
-git clone https://github.com/water0ff/dztools.git
+git clone https://github.com/water0n/dztools.git
 cd dztools
 ```
 
@@ -263,6 +263,6 @@ git checkout -b feature/nueva-funcion
 
 ## Autor
 
-Desarrollado y mantenido por Gerardo Zermeno (`water0ff`).
+Desarrollado y mantenido por Gerardo Zermeno (`water0n`).
 
-Repositorio: <https://github.com/water0ff/dztools>
+Repositorio: <https://github.com/water0n/dztools>

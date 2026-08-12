@@ -951,7 +951,7 @@ function Start-Application {
     Write-Host "`nTodos los derechos reservados para Gerardo Zermeño Tools." -ForegroundColor Cyan
     Write-Host "Para reportar errores o sugerencias, contacte vía Teams." -ForegroundColor Cyan
     Write-Host "O crea un issue en GitHub en:" -ForegroundColor Cyan
-    Write-Host "https://github.com/water0ff/dztools/issues/new" -ForegroundColor Cyan
+    Write-Host "https://github.com/water0n/dztools/issues/new" -ForegroundColor Cyan
     $null = $mainForm.ShowDialog()
 }
 try {

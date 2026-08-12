@@ -29,7 +29,7 @@ $baseRuntimePath = "C:\temp\dztools"
 $releasePath = Join-Path $baseRuntimePath "release"
 $versionFile = Join-Path $releasePath "version.json"
 $mainPath = Join-Path $releasePath "main.ps1"
-$Owner = "water0ff"
+$Owner = "water0n"
 $Repo = "dztools"
 
 function Get-LocalVersion {
