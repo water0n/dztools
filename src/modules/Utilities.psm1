@@ -1938,6 +1938,6 @@ Export-ModuleMember -Function @(
     'Get-AdminGroupName', 'Invoke-DiskCleanup', 'Stop-CleanmgrProcesses', 'Test-SameHost',
     'Test-7ZipInstalled', 'Download-FileWithProgressWpfStream', 'Refresh-AdapterStatus',
     'Get-NetworkAdapterStatus', 'Get-SqlPortWithDebug', 'Show-SqlPortsInfo', 'Show-WarnDialog',
-    'Get-7ZipPath', 'Install-7ZipWithChoco', 'Show-SQLselector', 'get-NSApplicationsIniReport',
+    'Get-7ZipPath', 'Install-7ZipWithChoco', 'Show-SQLselector', 'Show-WpfPathSelectionDialog', 'get-NSApplicationsIniReport',
     'Set-ClipboardTextSafe', 'Initialize-SystemInfo', 'Update-PortsUI', 'Update-NetworkUI',
     'Apply-SavedSqlCredentials', 'Apply-SavedSqlCredentials', 'Set-AdaptersToPrivate')

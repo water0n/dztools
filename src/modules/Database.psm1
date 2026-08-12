@@ -936,17 +936,11 @@ function Show-MultipleResultSets {
     [void]$tNull.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.TextBlock]::ForegroundProperty, $nullFg)))
     [void]$textStyleBase.Triggers.Add($tNull)
     $useStackedLayout = $Stacked -and $ResultSets.Count -gt 1
-    $stackPanel = $null
-    $scrollViewer = $null
+    $stackGrid = $null
+    $stackRowIndex = 0
     if ($useStackedLayout) {
-        $stackPanel = New-Object System.Windows.Controls.StackPanel
-        $stackPanel.Orientation = "Vertical"
-        $stackPanel.Margin = "4"
-
-        $scrollViewer = New-Object System.Windows.Controls.ScrollViewer
-        $scrollViewer.VerticalScrollBarVisibility = "Auto"
-        $scrollViewer.HorizontalScrollBarVisibility = "Disabled"
-        $scrollViewer.Content = $stackPanel
+        $stackGrid = New-Object System.Windows.Controls.Grid
+        $stackGrid.Margin = "4"
     }
     $totalRows = 0
     $i = 0
@@ -974,13 +968,24 @@ function Show-MultipleResultSets {
             [void]$headerPanel.Children.Add($titleText)
             $tab.Header = $headerPanel
         } else {
+            $headerRow = New-Object System.Windows.Controls.RowDefinition
+            $headerRow.Height = "Auto"
+            [void]$stackGrid.RowDefinitions.Add($headerRow)
+
+            $gridRow = New-Object System.Windows.Controls.RowDefinition
+            $gridRow.Height = [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Star)
+            $gridRow.MinHeight = 80
+            [void]$stackGrid.RowDefinitions.Add($gridRow)
+
             $headerLabel = New-Object System.Windows.Controls.TextBlock
             $headerLabel.Text = "📊 Resultado $i ($rowCount filas)"
             $headerLabel.FontWeight = "SemiBold"
             $headerLabel.FontSize = 11
             $headerLabel.Margin = if ($i -gt 1) { "4,12,4,4" } else { "4,4,4,4" }
             $headerLabel.Foreground = $headerFg
-            [void]$stackPanel.Children.Add($headerLabel)
+            [System.Windows.Controls.Grid]::SetRow($headerLabel, $stackRowIndex)
+            [void]$stackGrid.Children.Add($headerLabel)
+            $stackRowIndex++
         }
         $dg = New-Object System.Windows.Controls.DataGrid
         $dg.AutoGenerateColumns = $true
@@ -1349,10 +1354,30 @@ function Show-MultipleResultSets {
                 } catch { }
             })
         if ($useStackedLayout) {
-            $dg.MinHeight = 150
-            $dg.MaxHeight = 400
-            $dg.Margin = "4,0,4,10"
-            [void]$stackPanel.Children.Add($dg)
+            $dg.MinHeight = 80
+            $dg.Margin = "4,0,4,4"
+            [System.Windows.Controls.Grid]::SetRow($dg, $stackRowIndex)
+            [void]$stackGrid.Children.Add($dg)
+            $stackRowIndex++
+
+            if ($i -lt $ResultSets.Count) {
+                $splitterRow = New-Object System.Windows.Controls.RowDefinition
+                $splitterRow.Height = "6"
+                [void]$stackGrid.RowDefinitions.Add($splitterRow)
+
+                $splitter = New-Object System.Windows.Controls.GridSplitter
+                $splitter.Height = 6
+                $splitter.HorizontalAlignment = "Stretch"
+                $splitter.VerticalAlignment = "Center"
+                $splitter.ResizeDirection = "Rows"
+                $splitter.ResizeBehavior = "PreviousAndNext"
+                $splitter.ShowsPreview = $true
+                $splitter.Background = $gridLine
+                $splitter.ToolTip = "Arrastra para ajustar el alto de los resultados"
+                [System.Windows.Controls.Grid]::SetRow($splitter, $stackRowIndex)
+                [void]$stackGrid.Children.Add($splitter)
+                $stackRowIndex++
+            }
             Write-Host "`tResultado $i apilado con $rowCount filas" -ForegroundColor Green
         } else {
             $tab.Content = $dg
@@ -1382,7 +1407,7 @@ function Show-MultipleResultSets {
         [void]$headerPanel.Children.Add($iconText)
         [void]$headerPanel.Children.Add($titleText)
         $tab.Header = $headerPanel
-        $tab.Content = $scrollViewer
+        $tab.Content = $stackGrid
 
         if ($permanentTabIndex -ge 0) {
             $TabControl.Items.Insert($permanentTabIndex, $tab)
@@ -1773,6 +1798,12 @@ function Get-ExportableResultTabs {
 
         if ($item.Content -is [System.Windows.Controls.DataGrid]) {
             $dataGrids += $item.Content
+        } elseif ($item.Content -is [System.Windows.Controls.Panel]) {
+            foreach ($child in $item.Content.Children) {
+                if ($child -is [System.Windows.Controls.DataGrid]) {
+                    $dataGrids += $child
+                }
+            }
         } elseif ($item.Content -is [System.Windows.Controls.ScrollViewer]) {
             $content = $item.Content.Content
             if ($content -is [System.Windows.Controls.Panel]) {
@@ -2160,8 +2191,31 @@ function Export-ResultsCore {
         return
     }
 
+    $safeNameForExport = {
+        param([string]$Name)
+        $safe = ($Name -replace '[\\/:*?"<>|]', '-')
+        $safe = $safe.Trim()
+        if ([string]::IsNullOrWhiteSpace($safe)) { return "resultado" }
+        return $safe
+    }
+    $exportTargetToFile = {
+        param($Target, [string]$Path, [bool]$UseDelimited, [string]$Separator)
+        if ($UseDelimited) {
+            Export-ResultSetToDelimitedText -ResultSet $Target.DataTable -Path $Path -Separator $Separator
+        } else {
+            Export-ResultSetToCsv -ResultSet ([pscustomobject]@{ DataTable = $Target.DataTable }) -Path $Path
+        }
+    }
+
     $target = $null
+    $exportAll = $false
     if ($resultTabs.Count -gt 1) {
+        $totalRows = ($resultTabs | Measure-Object -Property RowCount -Sum).Sum
+        $allItem = [pscustomobject]@{
+            Path         = "__ALL_RESULTS__"
+            Display      = "Todos los resultados ($($resultTabs.Count) resultsets, $totalRows filas)"
+            DisplayShort = "Todos los resultados"
+        }
         $items = $resultTabs | ForEach-Object {
             [pscustomobject]@{
                 Path         = $_
@@ -2169,18 +2223,60 @@ function Export-ResultsCore {
                 DisplayShort = $_.DisplayShort
             }
         }
-        $selected = Show-WpfPathSelectionDialog -Title "Exportar resultados" -Prompt "Seleccione la pestaña de resultados a exportar:" -Items $items -ExecuteButtonText "Exportar"
+        $items = @($allItem) + @($items)
+        $selected = Show-WpfPathSelectionDialog -Title "Exportar resultados" -Prompt "Seleccione el resultado a exportar:" -Items $items -ExecuteButtonText "Exportar"
         if (-not $selected) { return }
-        $target = $selected.Path
+        if ([string]$selected.Path -eq "__ALL_RESULTS__") {
+            $exportAll = $true
+        } else {
+            $target = $selected.Path
+        }
     } else {
         $target = $resultTabs[0]
+    }
+
+    if ($exportAll) {
+        $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+        $saveDialog = New-Object Microsoft.Win32.SaveFileDialog
+        $saveDialog.Title = "Exportar todos los resultados"
+        $saveDialog.Filter = "CSV (*.csv)|*.csv|Texto delimitado (*.txt)|*.txt"
+        $saveDialog.FileName = "${timestamp}_resultados.csv"
+        $saveDialog.InitialDirectory = [Environment]::GetFolderPath('Desktop')
+        if ($saveDialog.ShowDialog() -ne $true) { return }
+
+        $basePath = $saveDialog.FileName
+        $baseDirectory = [System.IO.Path]::GetDirectoryName($basePath)
+        $baseName = [System.IO.Path]::GetFileNameWithoutExtension($basePath)
+        if ([string]::IsNullOrWhiteSpace($baseName)) { $baseName = "${timestamp}_resultados" }
+
+        $extension = [System.IO.Path]::GetExtension($basePath).ToLowerInvariant()
+        $useDelimited = ($extension -eq ".txt" -or $saveDialog.FilterIndex -eq 2)
+        $outputExtension = if ($useDelimited) { ".txt" } else { ".csv" }
+        $separator = "|"
+        if ($useDelimited) {
+            $separator = New-WpfInputDialog -Title "Separador de exportación" -Prompt "Ingrese el separador para los archivos de texto:" -DefaultValue "|"
+            if ($null -eq $separator) { return }
+        }
+
+        $createdFiles = @()
+        $index = 0
+        foreach ($resultTab in $resultTabs) {
+            $index++
+            $safeName = & $safeNameForExport ([string]$resultTab.DisplayShort)
+            $fileName = "{0}_{1:00}_{2}{3}" -f $baseName, $index, $safeName, $outputExtension
+            $filePath = Join-Path $baseDirectory $fileName
+            & $exportTargetToFile $resultTab $filePath $useDelimited $separator
+            $createdFiles += $filePath
+        }
+
+        Ui-Info "Exportación completada.`nArchivos: $($createdFiles.Count)`nCarpeta:`n$baseDirectory" "Exportación" $Ctx.MainWindow
+        return
     }
 
     $rowCount = [int]$target.RowCount
     $headerText = [string]$target.DisplayShort
 
-    $safeName = ($headerText -replace '[\\/:*?"<>|]', '-')
-    if ([string]::IsNullOrWhiteSpace($safeName)) { $safeName = "resultado" }
+    $safeName = & $safeNameForExport $headerText
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 
     $saveDialog = New-Object Microsoft.Win32.SaveFileDialog
@@ -2195,9 +2291,9 @@ function Export-ResultsCore {
     if ($extension -eq ".txt" -or $saveDialog.FilterIndex -eq 2) {
         $separator = New-WpfInputDialog -Title "Separador de exportación" -Prompt "Ingrese el separador para el archivo de texto:" -DefaultValue "|"
         if ($null -eq $separator) { return }
-        Export-ResultSetToDelimitedText -ResultSet $target.DataTable -Path $filePath -Separator $separator
+        & $exportTargetToFile $target $filePath $true $separator
     } else {
-        Export-ResultSetToCsv -ResultSet ([pscustomobject]@{ DataTable = $target.DataTable }) -Path $filePath
+        & $exportTargetToFile $target $filePath $false "|"
     }
 
     Ui-Info "Exportación completada en:`n$filePath" "Exportación" $Ctx.MainWindow
