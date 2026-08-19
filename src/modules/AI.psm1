@@ -1,7 +1,7 @@
 #requires -Version 5.0
 
 $script:DzAiApiKey = $null
-$script:DzAiModel = "gemini-2.5-flash"
+$script:DzAiModel = "gemini-3.7-flash"
 $script:DzAiCurrentRunspace = $null
 $script:DzAiCurrentPowerShell = $null
 $script:DzAiCurrentAsync = $null
@@ -230,31 +230,36 @@ function Invoke-DzGeminiGenerateContent {
     param(
         [Parameter(Mandatory = $true)][string]$Prompt,
         [string]$SystemInstruction = "",
-        [string]$Model = "gemini-2.5-flash",
+        [string]$Model = "gemini-3.7-flash",
         [Parameter(Mandatory = $true)][string]$ApiKey,
         [double]$Temperature = 0.2,
         [int]$MaxOutputTokens = 2048
     )
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) { throw "No se ha capturado la API key de Gemini." }
-    if ([string]::IsNullOrWhiteSpace($Model)) { $Model = "gemini-2.5-flash" }
+    if ([string]::IsNullOrWhiteSpace($Model)) { $Model = "gemini-3.7-flash" }
     if ($MaxOutputTokens -lt 128) { $MaxOutputTokens = 128 }
 
     $modelName = if ($Model -match '^models/') { $Model } else { "models/$Model" }
     $uri = "https://generativelanguage.googleapis.com/v1beta/$modelName`:generateContent?key=$ApiKey"
     Write-DzAiDebug "Invoke-DzGeminiGenerateContent modelo=$modelName uri=v1beta/...:generateContent" ([System.ConsoleColor]::Cyan)
+    $generationConfig = @{
+        maxOutputTokens = $MaxOutputTokens
+    }
+    if ($modelName -notmatch 'gemini-3' -or $PSBoundParameters.ContainsKey('Temperature')) {
+        $generationConfig.temperature = $Temperature
+    }
     $bodyObject = @{
         contents = @(
             @{
                 parts = @(@{ text = $Prompt })
             }
         )
-        generationConfig = @{
-            temperature = $Temperature
-            maxOutputTokens = $MaxOutputTokens
-        }
+        generationConfig = $generationConfig
     }
-    if ($modelName -match 'gemini-2\.5') {
+    if ($modelName -match 'gemini-3\.[56]-flash' -or $modelName -match 'gemini-3-flash') {
+        $bodyObject.generationConfig.thinkingConfig = @{ thinkingLevel = "minimal" }
+    } elseif ($modelName -match 'gemini-2\.5') {
         $bodyObject.generationConfig.thinkingConfig = @{ thinkingBudget = 0 }
     }
     if (-not [string]::IsNullOrWhiteSpace($SystemInstruction)) {
@@ -331,6 +336,8 @@ function Start-DzAiRequest {
             [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
             $fallback = if ($Model -match '^models/') { $Model } else { "models/$Model" }
             $preferredModels = @(
+                'models/gemini-3.7-flash',
+                'models/gemini-3.6-flash',
                 'models/gemini-2.5-flash',
                 'models/gemini-2.0-flash',
                 'models/gemini-flash-latest',
@@ -363,18 +370,23 @@ function Start-DzAiRequest {
 
             $uri = "https://generativelanguage.googleapis.com/v1beta/$($modelName):generateContent?key=$ApiKey"
             Send-WorkerLog "Preparando request generateContent. Modelo=$modelName PromptChars=$($Prompt.Length)"
+            $generationConfig = @{
+                maxOutputTokens = 900
+            }
+            if ($modelName -notmatch 'gemini-3') {
+                $generationConfig.temperature = 0.2
+            }
             $bodyObject = @{
                 contents = @(
                     @{
                         parts = @(@{ text = $Prompt })
                     }
                 )
-                generationConfig = @{
-                    temperature = 0.2
-                    maxOutputTokens = 900
-                }
+                generationConfig = $generationConfig
             }
-            if ($modelName -match 'gemini-2\.5') {
+            if ($modelName -match 'gemini-3\.[56]-flash' -or $modelName -match 'gemini-3-flash') {
+                $bodyObject.generationConfig.thinkingConfig = @{ thinkingLevel = "minimal" }
+            } elseif ($modelName -match 'gemini-2\.5') {
                 $bodyObject.generationConfig.thinkingConfig = @{ thinkingBudget = 0 }
             }
             if (-not [string]::IsNullOrWhiteSpace($SystemInstruction)) {
