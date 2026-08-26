@@ -106,19 +106,17 @@ function Invoke-DzSqlCommandInternal {
         $command = $connection.CreateCommand()
         $command.CommandText = $Query
         $command.CommandTimeout = 0
-        $returnsResultSet = $Query -match "(?si)\b(SELECT|OUTPUT)\b" -or $Query -match "(?si)^\s*(WITH|EXEC|EXECUTE)\b"
+        $returnsResultSet = $Query -match "(?si)^\s*(SELECT|WITH)" -or $Query -match "(?si)\b(SELECT|OUTPUT)\b" -or $Query -match "(?si)^\s*(EXEC|EXECUTE)\b"
         if ($returnsResultSet) {
             $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($command)
             $dataTable = New-Object System.Data.DataTable
-            $filled = [void]$adapter.Fill($dataTable)
-            if ($dataTable.Columns.Count -gt 0) {
-                return @{
-                    Success    = $true
-                    DataTable  = $dataTable
-                    Type       = "Query"
-                    DurationMs = $stopwatch.ElapsedMilliseconds
-                    Messages   = $messages
-                }
+            [void]$adapter.Fill($dataTable)
+            return @{
+                Success    = $true
+                DataTable  = $dataTable
+                Type       = "Query"
+                DurationMs = $stopwatch.ElapsedMilliseconds
+                Messages   = $messages
             }
         }
         $rowsAffected = $command.ExecuteNonQuery()
