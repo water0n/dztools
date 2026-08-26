@@ -527,7 +527,7 @@ function New-DzMarkdownTableText {
             }
             $cells += ConvertTo-DzMarkdownTableText -Value $value -NullText "NULL"
         }
-        $normalizedRows += ,$cells
+        $normalizedRows += , $cells
     }
     $widths = @()
     for ($i = 0; $i -lt $headerValues.Count; $i++) {
@@ -705,7 +705,7 @@ function Get-DzDataGridSelectionTable {
             foreach ($col in $visibleCols) {
                 $values += Get-DzDataGridCellValue -Row $row -Column $col
             }
-            $rows += ,$values
+            $rows += , $values
         }
         return [pscustomobject]@{
             Headers     = @($visibleCols | ForEach-Object { Get-DzDataGridColumnHeaderText -Column $_ })
@@ -745,7 +745,7 @@ function Get-DzDataGridSelectionTable {
                 $values += ""
             }
         }
-        $rows += ,$values
+        $rows += , $values
     }
     return [pscustomobject]@{
         Headers     = @($columns | ForEach-Object { Get-DzDataGridColumnHeaderText -Column $_ })
@@ -1633,6 +1633,79 @@ BEGIN CATCH
         ROLLBACK TRANSACTION;
     THROW;
 END CATCH;
+"@
+        "SR SYNC | nsplatformcontrol v2"                  = @"
+        BEGIN TRY
+        BEGIN TRANSACTION;
+
+        DECLARE @TotalAntes INT;
+        DECLARE @TotalTaxes INT;
+        DECLARE @TotalExcluidos INT;
+
+        -- Conteo antes de modificar la tabla
+        SELECT @TotalAntes = COUNT( * )
+        FROM nsplatformcontrol;
+
+        SELECT @TotalTaxes = COUNT( * )
+        FROM nsplatformcontrol
+        WHERE EntityType = 1;
+
+        -- Los que serán eliminados por el TRUNCATE
+        SET @TotalExcluidos = @TotalAntes - @TotalTaxes;
+
+        -- Guardar únicamente Taxes
+        SELECT
+        WorkspaceId,
+        EntityType,
+        OperationType,
+        0 AS IsSync,
+        0 AS Attempts,
+        CreateDate
+        INTO #tempcontroltaxes
+        FROM nsplatformcontrol
+        WHERE EntityType = 1;
+
+        -- Vaciar tabla
+        TRUNCATE TABLE nsplatformcontrol;
+
+        -- Restaurar Taxes
+        INSERT INTO nsplatformcontrol
+        (
+            WorkspaceId,
+            EntityType,
+            OperationType,
+            IsSync,
+            Attempts,
+            CreateDate
+        )
+        SELECT
+        WorkspaceId,
+        EntityType,
+        OperationType,
+        IsSync,
+        Attempts,
+        CreateDate
+        FROM #tempcontroltaxes;
+
+        DROP TABLE #tempcontroltaxes;
+
+        COMMIT TRANSACTION;
+
+        -- Resultado
+        SELECT
+        @TotalAntes AS TotalAntes,
+        @TotalTaxes AS TaxesConservados,
+        @TotalExcluidos AS FilasDejadasFuera;
+
+        END TRY
+        BEGIN CATCH
+
+        IF @@TRANCOUNT > 0
+        ROLLBACK TRANSACTION;
+
+        THROW;
+
+        END CATCH;
 "@
         "SR | Memoria Insuficiente"                       = @"
 UPDATE empresas
