@@ -106,17 +106,19 @@ function Invoke-DzSqlCommandInternal {
         $command = $connection.CreateCommand()
         $command.CommandText = $Query
         $command.CommandTimeout = 0
-        $returnsResultSet = $Query -match "(?si)^\s*(SELECT|WITH)" -or $Query -match "(?si)\bOUTPUT\b"
+        $returnsResultSet = $Query -match "(?si)\b(SELECT|OUTPUT)\b" -or $Query -match "(?si)^\s*(WITH|EXEC|EXECUTE)\b"
         if ($returnsResultSet) {
             $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($command)
             $dataTable = New-Object System.Data.DataTable
-            [void]$adapter.Fill($dataTable)
-            return @{
-                Success    = $true
-                DataTable  = $dataTable
-                Type       = "Query"
-                DurationMs = $stopwatch.ElapsedMilliseconds
-                Messages   = $messages
+            $filled = [void]$adapter.Fill($dataTable)
+            if ($dataTable.Columns.Count -gt 0) {
+                return @{
+                    Success    = $true
+                    DataTable  = $dataTable
+                    Type       = "Query"
+                    DurationMs = $stopwatch.ElapsedMilliseconds
+                    Messages   = $messages
+                }
             }
         }
         $rowsAffected = $command.ExecuteNonQuery()
@@ -214,7 +216,7 @@ function Invoke-DzSqlBatchInternal {
             $command.CommandTimeout = 0
             $command.CommandText = $oneBatch
             Add-Debug ("Ejecutando batch #{0} (len={1})..." -f ($batchIndex + 1), $oneBatch.Length)
-            $isSelect = $oneBatch -match "(?si)^\s*(SELECT|WITH|EXEC|EXECUTE|DECLARE.*SELECT)" -or $oneBatch -match "(?si)\bOUTPUT\b"
+            $isSelect = $oneBatch -match "(?si)\b(SELECT|OUTPUT)\b" -or $oneBatch -match "(?si)^\s*(WITH|EXEC|EXECUTE)\b"
             try {
                 if ($isSelect) {
                     try {
@@ -232,6 +234,8 @@ function Invoke-DzSqlBatchInternal {
                                 $resultSets.Add([PSCustomObject]@{ DataTable = $t; RowCount = $t.Rows.Count })
                                 Add-Debug ("RS#{0} Filas={1} Cols={2}" -f $resultSets.Count, $t.Rows.Count, $t.Columns.Count)
                             }
+                        } elseif ($filledTables -gt 0) {
+                            $totalRowsAffected += $filledTables
                         }
                     } catch {
                         Add-Debug ("Adapter.Fill EX: {0}" -f $_.Exception.Message)
@@ -1635,77 +1639,100 @@ BEGIN CATCH
 END CATCH;
 "@
         "SR SYNC | nsplatformcontrol v2"                  = @"
-        BEGIN TRY
-        BEGIN TRANSACTION;
+BEGIN TRY
+    BEGIN TRANSACTION;
 
-        DECLARE @TotalAntes INT;
-        DECLARE @TotalTaxes INT;
-        DECLARE @TotalExcluidos INT;
+    -- 1. Definición del catálogo de entidades
+    IF OBJECT_ID('tempdb..#CatalogoEntidades') IS NOT NULL DROP TABLE #CatalogoEntidades;
+    CREATE TABLE #CatalogoEntidades (
+        EntityType TINYINT PRIMARY KEY,
+        Codigo VARCHAR(5),
+        Entidad VARCHAR(50),
+        Descripcion VARCHAR(100)
+    );
 
-        -- Conteo antes de modificar la tabla
-        SELECT @TotalAntes = COUNT( * )
-        FROM nsplatformcontrol;
+    INSERT INTO #CatalogoEntidades (EntityType, Codigo, Entidad, Descripcion) VALUES
+    (1,  '01', 'Tax',                  'Catálogo de impuestos'),
+    (2,  '02', 'Group',                'Catálogo de grupos'),
+    (3,  '03', 'Subgroup',             'Catálogo de subgrupos'),
+    (4,  '04', 'ModifierGroup',        'Catálogo de grupos de modificadores'),
+    (5,  '05', 'Indication',           'Catálogo de comentarios de preparación'),
+    (6,  '06', 'PriceList',            'Catálogo de listas de precios'),
+    (7,  '07', 'MeasureUnit',          'Catálogo de unidades de medida'),
+    (8,  '08', 'Product',              'Catálogo de productos'),
+    (9,  '09', 'Modifier',             'Catálogo de modificadores'),
+    (10, '10', 'ProductModifierGroup', 'Productos con grupos de modificadores'),
+    (11, '11', 'SalesArea',            'Catálogo de áreas de venta'),
+    (12, '12', 'Device',               'Catálogo de dispositivos o estaciones'),
+    (13, '13', 'PaymentMethod',        'Catálogo de métodos de pago'),
+    (14, '14', 'User',                 'Catálogo de usuarios'),
+    (15, '15', 'Waiter',               'Catálogo de meseros'),
+    (16, '16', 'Shift',                'Catálogo de turnos'),
+    (17, '17', 'CustomerType',         'Catálogo de tipos de cliente'),
+    (18, '18', 'Table',                'Catálogo de mesas'),
+    (19, '19', 'Sale',                 'Catálogo de ventas'),
+    (20, '20', 'Invoice',              'Catálogo de facturas'),
+    (21, '21', 'OpenAccount',          'Resumen de cuentas abiertas'),
+    (22, '22', 'MaterialGroup',        'Catálogo de grupos de insumos'),
+    (23, '23', 'Material',             'Catálogo de insumos'),
+    (24, '24', 'Presentation',         'Catálogo de presentaciones'),
+    (25, '25', 'BillOfMaterials',      'Catálogo de recetas'),
+    (26, '26', 'Warehouse',            'Catálogo de almacenes'),
+    (27, '27', 'Inventory',            'Información de inventario'),
+    (28, '28', 'ProductEquivalence',   'Equivalencias de productos en unidades'),
+    (29, '29', 'SecurityEvents',       'Registro o catálogo de eventos de seguridad'),
+    (30, '30', 'CancellationInfo',     'Información o catálogo de cancelaciones');
 
-        SELECT @TotalTaxes = COUNT( * )
-        FROM nsplatformcontrol
-        WHERE EntityType = 1;
-
-        -- Los que serán eliminados por el TRUNCATE
-        SET @TotalExcluidos = @TotalAntes - @TotalTaxes;
-
-        -- Guardar únicamente Taxes
-        SELECT
-        WorkspaceId,
+    -- 2. Conteo previo por cada EntityType presente en la tabla
+    IF OBJECT_ID('tempdb..#ConteoPrevio') IS NOT NULL DROP TABLE #ConteoPrevio;
+    SELECT
         EntityType,
-        OperationType,
-        0 AS IsSync,
-        0 AS Attempts,
-        CreateDate
-        INTO #tempcontroltaxes
-        FROM nsplatformcontrol
-        WHERE EntityType = 1;
+        COUNT(*) AS Total
+    INTO #ConteoPrevio
+    FROM nsplatformcontrol
+    GROUP BY EntityType;
 
-        -- Vaciar tabla
-        TRUNCATE TABLE nsplatformcontrol;
+    -- 3. Limpieza: Eliminar todo excepto Taxes (EntityType = 1)
+    DELETE FROM nsplatformcontrol
+    WHERE EntityType <> 1;
 
-        -- Restaurar Taxes
-        INSERT INTO nsplatformcontrol
-        (
-            WorkspaceId,
-            EntityType,
-            OperationType,
-            IsSync,
-            Attempts,
-            CreateDate
-        )
-        SELECT
-        WorkspaceId,
-        EntityType,
-        OperationType,
-        IsSync,
-        Attempts,
-        CreateDate
-        FROM #tempcontroltaxes;
+    DECLARE @FilasEliminadas INT = @@ROWCOUNT;
+    DECLARE @TaxesConservados INT = (SELECT ISNULL(SUM(Total), 0) FROM #ConteoPrevio WHERE EntityType = 1);
+    DECLARE @TotalInicial INT = (SELECT ISNULL(SUM(Total), 0) FROM #ConteoPrevio);
 
-        DROP TABLE #tempcontroltaxes;
+    COMMIT TRANSACTION;
 
-        COMMIT TRANSACTION;
+    -- RESULTADO 1: Resumen General
+    SELECT
+        @TotalInicial AS [Total Inicial],
+        @FilasEliminadas AS [Filas Eliminadas],
+        @TaxesConservados AS [Taxes Conservados],
+        'Limpieza completada exitosamente' AS [Estado];
 
-        -- Resultado
-        SELECT
-        @TotalAntes AS TotalAntes,
-        @TotalTaxes AS TaxesConservados,
-        @TotalExcluidos AS FilasDejadasFuera;
+    -- RESULTADO 2: Inventario Detallado por Catálogo
+    SELECT
+        c.Codigo AS [Código],
+        c.Entidad AS [Entidad],
+        c.Descripcion AS [Descripción del Catálogo],
+        p.Total AS [Filas Afectadas],
+        CASE
+            WHEN c.EntityType = 1 THEN 'Conservado'
+            ELSE 'Eliminado'
+        END AS [Acción Realizada]
+    FROM #ConteoPrevio p
+    JOIN #CatalogoEntidades c ON p.EntityType = c.EntityType
+    ORDER BY c.EntityType;
 
-        END TRY
-        BEGIN CATCH
+    -- Limpieza de tablas temporales
+    DROP TABLE #CatalogoEntidades;
+    DROP TABLE #ConteoPrevio;
 
-        IF @@TRANCOUNT > 0
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0
         ROLLBACK TRANSACTION;
-
-        THROW;
-
-        END CATCH;
+    THROW;
+END CATCH;
 "@
         "SR | Memoria Insuficiente"                       = @"
 UPDATE empresas
