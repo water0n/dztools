@@ -1,4 +1,4 @@
-#requires -Version 5.0
+﻿#requires -Version 5.0
 
 $script:DzR2WorkerUrl = "https://dztools-api.waterbetrayer.workers.dev"
 

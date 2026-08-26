@@ -1,4 +1,4 @@
-#requires -Version 5.0
+﻿#requires -Version 5.0
 #SqliteOps.psm1 - SQLite runtime and cleaner tools for DzTools
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore

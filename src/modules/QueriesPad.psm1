@@ -948,6 +948,21 @@ function Set-QueryTabsDatabase {
     foreach ($item in $TabControl.Items) {
         if ($item -isnot [System.Windows.Controls.TabItem]) { continue }
         if (-not $item.Tag -or $item.Tag.Type -ne 'QueryTab') { continue }
+        if ($item.Tag.FilePath) {
+            $fileName = [System.IO.Path]::GetFileName($item.Tag.FilePath)
+            $shortTitle = if (-not [string]::IsNullOrWhiteSpace($Database)) {
+                if ($Database.Length -gt 7) { "$fileName (_$($Database.Substring($Database.Length - 7)))" } else { "$fileName ($Database)" }
+            } else {
+                $fileName
+            }
+            $fullTitle = if (-not [string]::IsNullOrWhiteSpace($Database)) { "$fileName ($Database)`n$($item.Tag.FilePath)" } else { "$fileName`n$($item.Tag.FilePath)" }
+            $item.Tag.Database = $Database
+            $item.Tag.Title = $fileName
+            $item.Tag.TitleShort = $shortTitle
+            $item.ToolTip = $fullTitle
+            Update-QueryTabHeader -TabItem $item
+            continue
+        }
         if (-not $item.Tag.Number) {
             $parsedNumber = Get-QueryTabNumberFromTitle -Title ([string]$item.Tag.Title)
             if ($parsedNumber) {
@@ -1034,6 +1049,7 @@ function New-QueryTab {
         IsDirty         = $false
         Number          = $tabNumber
         Database        = $dbName
+        FilePath        = $null
     }
     $editor.Add_TextChanged({
             $tabItem.Tag.IsDirty = $true
@@ -1062,6 +1078,73 @@ function New-QueryTab {
     [void]$TabControl.Items.Insert($insertIndex, $tabItem)
     $TabControl.SelectedItem = $tabItem
     return $tabItem
+}
+function Open-SqlFileInTab {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][System.Windows.Controls.TabControl]$TabControl,
+        [Parameter(Mandatory = $true)][string]$FilePath
+    )
+    if (-not (Test-Path -LiteralPath $FilePath)) {
+        throw "El archivo no existe: $FilePath"
+    }
+
+    $fileContent = ""
+    try {
+        $fileContent = [System.IO.File]::ReadAllText($FilePath, [System.Text.Encoding]::UTF8)
+    } catch {
+        try {
+            $fileContent = [System.IO.File]::ReadAllText($FilePath, [System.Text.Encoding]::Default)
+        } catch {
+            throw "No se pudo leer el archivo '$FilePath': $($_.Exception.Message)"
+        }
+    }
+
+    $fileName = [System.IO.Path]::GetFileName($FilePath)
+    $dbName = $null
+    if ($global:cmbDatabases -and (Get-Command Get-DbNameFromComboSelection -ErrorAction SilentlyContinue)) {
+        $dbName = Get-DbNameFromComboSelection -ComboBox $global:cmbDatabases
+    }
+
+    $targetTab = $null
+    $activeTab = Get-ActiveQueryTab -TabControl $TabControl
+    if ($activeTab -and $activeTab.Tag -and $activeTab.Tag.Editor) {
+        $currentText = Get-SqlEditorText -Editor $activeTab.Tag.Editor
+        if ([string]::IsNullOrWhiteSpace($currentText) -and -not $activeTab.Tag.IsDirty) {
+            $targetTab = $activeTab
+        }
+    }
+
+    if (-not $targetTab) {
+        $targetTab = New-QueryTab -TabControl $TabControl
+    }
+
+    if ($targetTab -and $targetTab.Tag -and $targetTab.Tag.Editor) {
+        $editor = $targetTab.Tag.Editor
+        Set-SqlEditorText -Editor $editor -Text $fileContent
+
+        $shortTitle = if (-not [string]::IsNullOrWhiteSpace($dbName)) {
+            if ($dbName.Length -gt 7) { "$fileName (_$($dbName.Substring($dbName.Length - 7)))" } else { "$fileName ($dbName)" }
+        } else {
+            $fileName
+        }
+        $fullTitle = if (-not [string]::IsNullOrWhiteSpace($dbName)) { "$fileName ($dbName)`n$FilePath" } else { "$fileName`n$FilePath" }
+
+        $targetTab.Tag.Title = $fileName
+        $targetTab.Tag.TitleShort = $shortTitle
+        $targetTab.Tag.FilePath = $FilePath
+        $targetTab.Tag.IsDirty = $false
+        $targetTab.ToolTip = $fullTitle
+        Update-QueryTabHeader -TabItem $targetTab
+
+        $TabControl.SelectedItem = $targetTab
+        try { $editor.Focus() | Out-Null } catch {}
+        if (Get-Command Write-DzDebug -ErrorAction SilentlyContinue) {
+            Write-DzDebug "`t[DEBUG][Open-SqlFileInTab] Archivo cargado en pestaña: '$fileName'"
+        }
+        return $targetTab
+    }
+    return $null
 }
 function Get-NextQueryNumber {
     param([Parameter(Mandatory = $true)][System.Windows.Controls.TabControl]$TabControl)
@@ -2641,7 +2724,7 @@ function New-SqlEditor {
 Export-ModuleMember -Function @(
     'Initialize-QueriesConfig', 'Add-QueryToHistory', 'Save-DbUiContext', 'Get-QueryHistory',
     'Clear-QueryHistory', 'Remove-QueriesFromHistory', 'Save-OpenQueryTabs', 'Restore-OpenQueryTabs',
-    'Show-QueryHistoryWindow', 'Execute-QueryUiSafe', 'Export-ResultsUiSafe', 'New-QueryTab',
+    'Show-QueryHistoryWindow', 'Execute-QueryUiSafe', 'Export-ResultsUiSafe', 'New-QueryTab', 'Open-SqlFileInTab',
     'Set-QueryTabsDatabase', 'Close-OtherQueryTabs', 'Get-ActiveQueryTab', 'Get-ActiveQueryRichTextBox',
     'Set-QueryTextInActiveTab', 'Insert-TextIntoActiveQuery', 'Update-QueryTabHeader',
     'Close-QueryTab', 'Get-SqlEditorPaths', 'Import-AvalonEditAssembly',

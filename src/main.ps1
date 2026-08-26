@@ -47,8 +47,6 @@ foreach ($module in $modules) {
 }
 $global:defaultInstructions = @"
 ----- CAMBIOS -----
-- AI SQL Context para generar consultas con IA (beta)
-    - Nuevo modelo Gemini 3.7
 - Se agregó botón para SQLite Browser (dzSQLite)
     * Se agregó opción para incluir el respaldo de la base de datos en el mismo archivo comprimido.
 - Subida a CloudFare Buckets
@@ -56,6 +54,7 @@ $global:defaultInstructions = @"
 - Monitor de servicios y logs
 - Historial de queries
 - SSMS Portable
+    * (nuevo) Se agregó opción para abrir SSMS Portable desde la pestaña de queries.
     * Copiar ahora permite tipo markdown.
     * TreeView nuevo!
     * Crear y eliminar bases de datos
@@ -69,6 +68,8 @@ $global:defaultInstructions = @"
     * Mejoras en seguridad y manejo de errores
     * Carga de INIS en la conexión a BDD.
     * Multiples Queries (MultiQuery)
+    * AI SQL Context para generar consultas con IA (beta)
+        - Nuevo modelo Gemini 3.7
 - Instalador de impresoras Generic Text por IP
 - Registro y deregistro de Dlls
 - Configuraciones de Firewall
@@ -174,6 +175,7 @@ function New-MainForm {
     $btnSsmsPanelToggle = $window.FindName("btnSsmsPanelToggle")
     $lblConnectionStatus = $window.FindName("lblConnectionStatus")
     $btnExecute = $window.FindName("btnExecute")
+    $btnOpenFile = $window.FindName("btnOpenFile")
     $btnClearQuery = $window.FindName("btnClearQuery")
     $btnExport = $window.FindName("btnExport")
     $btnHistorial = $window.FindName("btnHistorial")
@@ -285,6 +287,7 @@ function New-MainForm {
     $global:btnConnectDb = $btnConnectDb
     $global:btnDisconnectDb = $btnDisconnectDb
     $global:btnExecute = $btnExecute
+    $global:btnOpenFile = $btnOpenFile
     $global:chkStackedResults = $chkStackedResults
     $global:btnClearQuery = $btnClearQuery
     $global:btnExport = $btnExport
@@ -818,6 +821,28 @@ function New-MainForm {
             Write-Host "`n`t- - - Ejecutando consulta - - -" -ForegroundColor Gray
             Execute-QueryUiSafe
         })
+    if ($btnOpenFile) {
+        $btnOpenFile.Add_Click({
+                Write-DzDebug ("`t[DEBUG] Click en 'Abrir Archivo' - {0}" -f (Get-Date -Format "HH:mm:ss")) -Color DarkYellow
+                try {
+                    $openDialog = New-Object Microsoft.Win32.OpenFileDialog
+                    $openDialog.Title = "Abrir archivo SQL o texto"
+                    $openDialog.Filter = "Scripts SQL (*.sql)|*.sql|Archivos de texto (*.txt;*.log;*.csv;*.json;*.xml)|*.txt;*.log;*.csv;*.json;*.xml|Todos los archivos (*.*)|*.*"
+                    $openDialog.FilterIndex = 1
+                    $openDialog.Multiselect = $false
+                    if ($openDialog.ShowDialog() -eq $true) {
+                        $selectedPath = $openDialog.FileName
+                        if (-not [string]::IsNullOrWhiteSpace($selectedPath) -and (Test-Path -LiteralPath $selectedPath)) {
+                            Write-Host "`n- - - Abriendo archivo: $selectedPath - - -" -ForegroundColor Cyan
+                            Open-SqlFileInTab -TabControl $global:tcQueries -FilePath $selectedPath | Out-Null
+                        }
+                    }
+                } catch {
+                    Write-Host "`n[ERROR Abrir Archivo] $($_.Exception.Message)" -ForegroundColor Red
+                    Ui-Error "Error al abrir el archivo:`n$($_.Exception.Message)" "Error" $window
+                }
+            })
+    }
     $cmbDatabases.Add_SelectionChanged({
             if ($global:cmbDatabases.SelectedItem) {
                 $dbName = Get-DbNameFromComboSelection -ComboBox $global:cmbDatabases

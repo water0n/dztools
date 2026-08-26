@@ -1646,11 +1646,24 @@ function Get-MainWindowXaml {
                                             FontSize="12"
                                             Margin="0,0,0,8"/>
 
-                                    <!-- Botón Ejecutar -->
-                                    <Button Content="▶ Ejecutar (F5)" Name="btnExecute"
-                                            Height="32" Margin="0,0,0,8"
-                                            Style="{StaticResource DatabaseButtonStyle}"
-                                            IsEnabled="False" FontSize="11"/>
+                                    <!-- Botones Ejecutar y Abrir -->
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Button Content="▶ Ejecutar (F5)" Name="btnExecute"
+                                                Grid.Column="0"
+                                                Height="32" Margin="0,0,3,0"
+                                                Style="{StaticResource DatabaseButtonStyle}"
+                                                IsEnabled="False" FontSize="11"/>
+                                        <Button Content="📁 Abrir" Name="btnOpenFile"
+                                                Grid.Column="1"
+                                                Height="32" Margin="3,0,0,0"
+                                                Style="{StaticResource DatabaseButtonStyle}"
+                                                IsEnabled="False" FontSize="11"
+                                                ToolTip="Abrir archivo SQL o texto en una nueva pestaña"/>
+                                    </Grid>
 
                                     <!-- Modo de resultados -->
                                     <CheckBox Name="chkStackedResults"

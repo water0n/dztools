@@ -1,4 +1,4 @@
-#requires -Version 5.0
+﻿#requires -Version 5.0
 
 $script:DzAiApiKey = $null
 $script:DzAiModel = "gemini-3.7-flash"

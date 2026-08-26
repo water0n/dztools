@@ -1956,6 +1956,7 @@ function Disconnect-DbCore {
     Write-DzDebug "`t[DEBUG][Disconnect] Deshabilitando controles de operaciones..."
     if ($Ctx.btnDisconnectDb) { $Ctx.btnDisconnectDb.IsEnabled = $false }
     if ($Ctx.btnExecute) { $Ctx.btnExecute.IsEnabled = $false }
+    if ($Ctx.btnOpenFile) { $Ctx.btnOpenFile.IsEnabled = $false }
     if ($Ctx.btnClearQuery) { $Ctx.btnClearQuery.IsEnabled = $false }
     if ($Ctx.btnExport) { $Ctx.btnExport.IsEnabled = $false }
     if ($Ctx.btnHistorial) { $Ctx.btnHistorial.IsEnabled = $false }
@@ -2044,6 +2045,7 @@ function Connect-DbCore {
 
     if ($Ctx.btnDisconnectDb) { $Ctx.btnDisconnectDb.IsEnabled = $true }
     if ($Ctx.btnExecute) { $Ctx.btnExecute.IsEnabled = $true }
+    if ($Ctx.btnOpenFile) { $Ctx.btnOpenFile.IsEnabled = $true }
     if ($Ctx.btnClearQuery) { $Ctx.btnClearQuery.IsEnabled = $true }
     if ($Ctx.cmbQueries) { $Ctx.cmbQueries.IsEnabled = $true }
     if ($Ctx.btnExport) { $Ctx.btnExport.IsEnabled = $true }
@@ -2368,6 +2370,7 @@ function Get-DbUiContext {
 
         btnDisconnectDb        = $global:btnDisconnectDb
         btnExecute             = $global:btnExecute
+        btnOpenFile            = $global:btnOpenFile
         btnClearQuery          = $global:btnClearQuery
         btnExport              = $global:btnExport
         btnHistorial           = $global:btnHistorial

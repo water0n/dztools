@@ -1,4 +1,4 @@
-$modulePath = Join-Path $PSScriptRoot "..\src\modules\Database.psm1"
+﻿$modulePath = Join-Path $PSScriptRoot "..\src\modules\Database.psm1"
 
 Add-Type -AssemblyName PresentationFramework
 Import-Module $modulePath -Force
