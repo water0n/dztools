@@ -1863,19 +1863,23 @@ function Get-MainWindowXaml {
                                                     FontSize="10"
                                                     Foreground="{DynamicResource AccentMuted}"
                                                     Margin="0,0,0,4"/>
-                                            <TextBox Name="txtDzAiOutput"
+                                            <Border Name="brdDzAiOutput"
                                                     Grid.Row="1"
-                                                    IsReadOnly="True"
-                                                    TextWrapping="Wrap"
-                                                    AcceptsReturn="True"
-                                                    VerticalScrollBarVisibility="Auto"
-                                                    FontFamily="Consolas"
-                                                    FontSize="11"
-                                                    Padding="8"
                                                     Background="{DynamicResource ControlBg}"
-                                                    Foreground="{DynamicResource ControlFg}"
                                                     BorderBrush="{DynamicResource BorderBrushColor}"
-                                                    BorderThickness="1"/>
+                                                    BorderThickness="1">
+                                                <TextBox Name="txtDzAiOutput"
+                                                        IsReadOnly="True"
+                                                        TextWrapping="Wrap"
+                                                        AcceptsReturn="True"
+                                                        VerticalScrollBarVisibility="Auto"
+                                                        FontFamily="Consolas"
+                                                        FontSize="11"
+                                                        Padding="8"
+                                                        Background="Transparent"
+                                                        Foreground="{DynamicResource ControlFg}"
+                                                        BorderThickness="0"/>
+                                            </Border>
                                         </Grid>
                                     </Grid>
                                 </TabItem>

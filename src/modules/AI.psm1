@@ -125,13 +125,72 @@ function Set-DzAiStatus {
     } catch {}
 }
 
+function Initialize-DzAiOutputEditor {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$Window)
+
+    $global:brdDzAiOutput = $Window.FindName("brdDzAiOutput")
+    if (-not $global:brdDzAiOutput) { return }
+    if (-not (Get-Command Get-SqlEditorPaths -ErrorAction SilentlyContinue) -or
+        -not (Get-Command Import-AvalonEditAssembly -ErrorAction SilentlyContinue) -or
+        -not (Get-Command Get-SqlEditorHighlighting -ErrorAction SilentlyContinue)) {
+        Write-DzAiDebug "AvalonEdit no disponible para salida IA; se usara TextBox." ([System.ConsoleColor]::Yellow)
+        return
+    }
+
+    try {
+        $paths = Get-SqlEditorPaths
+        Import-AvalonEditAssembly -AssemblyPath $paths.AssemblyPath
+
+        $brushConverter = New-Object System.Windows.Media.BrushConverter
+        $editor = New-Object ICSharpCode.AvalonEdit.TextEditor
+        $editor.IsReadOnly = $true
+        $editor.ShowLineNumbers = $false
+        $editor.WordWrap = $true
+        $editor.FontFamily = "Consolas"
+        $editor.FontSize = 11
+        $editor.Padding = [System.Windows.Thickness]::new(8)
+        $editor.HorizontalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
+        $editor.VerticalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
+        $editor.Background = $brushConverter.ConvertFromString("#F5F5F5")
+        $editor.Foreground = $brushConverter.ConvertFromString("#000000")
+        $editor.TextArea.SelectionBrush = $brushConverter.ConvertFromString("#264F78")
+        $editor.TextArea.SelectionForeground = $brushConverter.ConvertFromString("#FFFFFF")
+        $editor.TextArea.TextView.CurrentLineBackground = $brushConverter.ConvertFromString("#EDECEC")
+        $editor.TextArea.TextView.CurrentLineBorder = $null
+        $editor.Options.HighlightCurrentLine = $false
+        $editor.Options.EnableHyperlinks = $false
+        $editor.Options.EnableEmailHyperlinks = $false
+        $editor.Options.EnableTextDragDrop = $false
+        $editor.SyntaxHighlighting = Get-SqlEditorHighlighting -HighlightingPath $paths.HighlightingPath
+
+        $global:brdDzAiOutput.Child = $editor
+        $global:txtDzAiOutputEditor = $editor
+        Write-DzAiDebug "Salida IA inicializada con AvalonEdit y resaltado SQL." ([System.ConsoleColor]::Green)
+    } catch {
+        $global:txtDzAiOutputEditor = $null
+        Write-DzAiDebug ("No se pudo inicializar AvalonEdit para IA: {0}" -f $_.Exception.Message) ([System.ConsoleColor]::Yellow)
+    }
+}
+
 function Set-DzAiOutput {
     param([string]$Text)
-    $len = if ($null -eq $Text) { 0 } else { ([string]$Text).Length }
+    $outputText = if ($null -eq $Text) { "" } else { [string]$Text }
+    $len = $outputText.Length
     Write-DzAiDebug "Actualizando salida IA. Caracteres=$len" ([System.ConsoleColor]::DarkGray)
     try {
+        if ($global:txtDzAiOutputEditor) {
+            $global:txtDzAiOutputEditor.Text = $outputText
+            try { $global:txtDzAiOutputEditor.CaretOffset = 0 } catch {}
+            try {
+                $global:txtDzAiOutputEditor.ScrollToLine(1)
+            } catch {
+                try { $global:txtDzAiOutputEditor.ScrollToHome() } catch {}
+            }
+            return
+        }
         if ($global:txtDzAiOutput) {
-            $global:txtDzAiOutput.Text = $Text
+            $global:txtDzAiOutput.Text = $outputText
             $global:txtDzAiOutput.SelectionStart = 0
             $global:txtDzAiOutput.SelectionLength = 0
             $global:txtDzAiOutput.ScrollToHome()
@@ -554,6 +613,28 @@ function Start-DzAiRequest {
     Write-DzAiDebug "Timer IA iniciado." ([System.ConsoleColor]::DarkGray)
 }
 
+function Get-DzAiConnectionContextText {
+    $server = ""
+    $database = ""
+    try {
+        if ($global:txtServer) { $server = ([string]$global:txtServer.Text).Trim() }
+    } catch {}
+    try {
+        if ($global:cmbDatabases) {
+            $database = ([string]$global:cmbDatabases.Text).Trim()
+            if ([string]::IsNullOrWhiteSpace($database) -and $global:cmbDatabases.SelectedItem) {
+                $database = ([string]$global:cmbDatabases.SelectedItem).Trim()
+            }
+        }
+    } catch {}
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($server)) { $lines.Add("Servidor SQL activo: $server") }
+    if (-not [string]::IsNullOrWhiteSpace($database)) { $lines.Add("Base de datos activa: $database") }
+    $lines.Add("Aplicacion: dztools, herramienta de soporte tecnico para SQL Server y entornos NationalSoft.")
+    return ($lines -join "`n")
+}
+
 function Invoke-DzAiExplainQuery {
     Write-DzAiDebug "Boton 'Explica el Query' presionado." ([System.ConsoleColor]::Cyan)
     $query = Get-DzAiActiveQueryText
@@ -563,15 +644,33 @@ function Invoke-DzAiExplainQuery {
         return
     }
 
-    $system = "Eres un asistente experto en SQL Server y soporte tecnico. Responde en espanol claro, practico y breve. Maximo 8 lineas. No uses introducciones largas, no repitas el query completo, no ejecutes SQL ni inventes objetos que no aparecen en el texto."
+    $context = Get-DzAiConnectionContextText
+    $system = @"
+Eres un asistente experto en SQL Server para soporte tecnico.
+Responde en espanol claro, practico y accionable para alguien que revisa una consulta en dztools.
+No uses Markdown decorativo, no uses negritas con **, no repitas el query completo y no inventes tablas, columnas ni relaciones que no aparezcan en el texto.
+Si das una recomendacion, debe ser concreta y relacionada con rendimiento, seguridad, claridad, indices, filtros o riesgo de modificacion de datos.
+"@
     $prompt = @"
 Explica el siguiente query SQL para un tecnico o administrador.
 
+Contexto disponible:
+$context
+
 Formato:
-- 3 a 6 bullets cortos.
-- Menciona tablas/filtros/joins importantes si aparecen.
-- Si modifica datos, marca el riesgo.
-- Si aplica, da 1 revision concreta.
+Resumen:
+- 1 o 2 bullets con que hace el query y que datos espera devolver o modificar.
+
+Desglose:
+- Explica FROM/JOIN/WHERE/GROUP BY/ORDER BY/TOP si aparecen.
+- Menciona tablas, alias, filtros, joins y columnas importantes.
+
+Riesgos o detalles:
+- Si hay SELECT *, TOP sin ORDER BY, NOLOCK, funciones en filtros, conversiones, subconsultas costosas o cambios de datos, explica el impacto.
+- Si no hay riesgos claros, dilo en una linea breve.
+
+Recomendacion:
+- Da 1 recomendacion concreta. Puede ser de rendimiento, legibilidad, seguridad o validacion antes de ejecutar.
 
 QUERY:
 $query
@@ -601,7 +700,7 @@ function Invoke-DzAiExplainMessages {
         Write-DzAiDebug "No hay query activo para adjuntar a mensajes." ([System.ConsoleColor]::DarkGray)
     }
 
-    $system = "Eres un asistente experto en SQL Server y soporte tecnico. Explica mensajes de ejecucion en espanol claro y accionable. Maximo 8 lineas. No repitas los mensajes completos ni des pasos genericos de SSMS salvo que sean necesarios. Usa el query activo para diagnosticar si viene incluido. No inventes detalles fuera del texto."
+    $system = "Eres un asistente experto en SQL Server y soporte tecnico. Explica mensajes de ejecucion en espanol claro y accionable. Maximo 8 lineas. No uses Markdown decorativo ni negritas con **. No repitas los mensajes completos ni des pasos genericos de SSMS salvo que sean necesarios. Usa el query activo para diagnosticar si viene incluido. No inventes detalles fuera del texto."
     $prompt = @"
 Explica los siguientes mensajes generados por la ejecucion de un query SQL.
 
@@ -713,7 +812,7 @@ function Invoke-DzAiGenerateSql {
 
 function Initialize-DzAiTab {
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)][System.Windows.Window]$Window)
+    param([Parameter(Mandatory = $true)]$Window)
 
     try {
         Write-DzAiDebug "Inicializando pestaña IA." ([System.ConsoleColor]::Cyan)
@@ -727,9 +826,12 @@ function Initialize-DzAiTab {
         $global:btnDzAiGenerateSql = $Window.FindName("btnDzAiGenerateSql")
         $global:txtDzAiQuestion = $Window.FindName("txtDzAiQuestion")
         $global:btnDzAiLogout = $Window.FindName("btnDzAiLogout")
+        $global:brdDzAiOutput = $Window.FindName("brdDzAiOutput")
         $global:txtDzAiOutput = $Window.FindName("txtDzAiOutput")
         $global:lblDzAiStatus = $Window.FindName("lblDzAiStatus")
         $global:tabDzAi = $Window.FindName("tabDzAi")
+
+        Initialize-DzAiOutputEditor -Window $Window
 
         if ($global:tcResults) { [void](Move-DzAiTabLast -TabControl $global:tcResults) }
         Write-DzAiDebug "Controles IA localizados y pestaña movida al final." ([System.ConsoleColor]::DarkGray)
