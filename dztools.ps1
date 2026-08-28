@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Branch = "release",
     [switch]$ForceUpdate
 )
@@ -44,11 +44,15 @@ function Get-LocalVersion {
     }
 }
 
-function Get-LatestGitHubVersion {
+function Get-LatestGitHubRelease {
     try {
         $apiUrl = "https://api.github.com/repos/$Owner/$Repo/releases/latest"
-        $release = Invoke-RestMethod -Uri $apiUrl -UseBasicParsing -ErrorAction Stop
-        return $release.tag_name
+        $release = Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "PowerShell" } -UseBasicParsing -ErrorAction Stop
+        return [pscustomobject]@{
+            Tag   = [string]$release.tag_name
+            Name  = [string]$release.name
+            Notes = [string]$release.body
+        }
     } catch {
         Write-Host "  ⚠ No se pudo obtener la versión remota" -ForegroundColor Yellow
         return $null
@@ -103,7 +107,8 @@ if ($hasLocalInstall -and -not $ForceUpdate) {
     Write-Host ""
 
     Write-Host "  Verificando actualizaciones..." -ForegroundColor Yellow
-    $remoteVersion = Get-LatestGitHubVersion
+    $remoteRelease = Get-LatestGitHubRelease
+    $remoteVersion = if ($remoteRelease) { $remoteRelease.Tag } else { $null }
 
     if ($null -ne $remoteVersion) {
         Write-Host "  Versión remota: " -NoNewline -ForegroundColor Gray
@@ -127,6 +132,17 @@ if ($hasLocalInstall -and -not $ForceUpdate) {
             "Newer" {
                 Write-Host "$remoteVersion " -NoNewline -ForegroundColor Yellow
                 Write-Host "⚠ Actualización disponible" -ForegroundColor Yellow
+
+                if ($remoteRelease.Notes -and -not [string]::IsNullOrWhiteSpace($remoteRelease.Notes)) {
+                    Write-Host ""
+                    Write-Host "  Notas de la versión:" -ForegroundColor Cyan
+                    foreach ($line in ($remoteRelease.Notes.Trim() -split "`r?`n")) {
+                        if (-not [string]::IsNullOrWhiteSpace($line)) {
+                            Write-Host "    $($line.Trim())" -ForegroundColor White
+                        }
+                    }
+                }
+
                 Write-Host ""
                 Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
                 Write-Host ""

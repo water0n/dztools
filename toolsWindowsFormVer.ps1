@@ -1,4 +1,4 @@
-if (!(Test-Path -Path "C:\Temp")) {
+﻿if (!(Test-Path -Path "C:\Temp")) {
     New-Item -ItemType Directory -Path "C:\Temp" | Out-Null
     Write-Host "Carpeta 'C:\Temp' creada correctamente."
 }
