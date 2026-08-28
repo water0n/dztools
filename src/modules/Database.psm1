@@ -938,9 +938,15 @@ function Show-MultipleResultSets {
     [void]$tNull.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.TextBlock]::ForegroundProperty, $nullFg)))
     [void]$textStyleBase.Triggers.Add($tNull)
     $useStackedLayout = $Stacked -and $ResultSets.Count -gt 1
+    $stackScrollViewer = $null
     $stackGrid = $null
     $stackRowIndex = 0
     if ($useStackedLayout) {
+        $stackScrollViewer = New-Object System.Windows.Controls.ScrollViewer
+        $stackScrollViewer.VerticalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
+        $stackScrollViewer.HorizontalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Disabled
+        $stackScrollViewer.Focusable = $false
+
         $stackGrid = New-Object System.Windows.Controls.Grid
         $stackGrid.Margin = "4"
     }
@@ -972,8 +978,9 @@ function Show-MultipleResultSets {
             $tab.Header = $headerPanel
         } else {
             $resultPanelRow = New-Object System.Windows.Controls.RowDefinition
-            $resultPanelRow.Height = [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Star)
-            $resultPanelRow.MinHeight = 120
+            $initialHeight = if ($rowCount -eq 0) { 85 } elseif ($rowCount -le 3) { 110 } else { 180 }
+            $resultPanelRow.Height = [System.Windows.GridLength]::new($initialHeight, [System.Windows.GridUnitType]::Pixel)
+            $resultPanelRow.MinHeight = 65
             [void]$stackGrid.RowDefinitions.Add($resultPanelRow)
 
             $resultPanel = New-Object System.Windows.Controls.Grid
@@ -985,7 +992,7 @@ function Show-MultipleResultSets {
 
             $gridRow = New-Object System.Windows.Controls.RowDefinition
             $gridRow.Height = [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Star)
-            $gridRow.MinHeight = 80
+            $gridRow.MinHeight = 45
             [void]$resultPanel.RowDefinitions.Add($gridRow)
 
             $headerLabel = New-Object System.Windows.Controls.TextBlock
@@ -1364,8 +1371,27 @@ function Show-MultipleResultSets {
                 } catch { }
             })
         if ($useStackedLayout) {
-            $dg.MinHeight = 80
+            $dg.MinHeight = 45
             $dg.Margin = "4,0,4,4"
+
+            if ($stackScrollViewer) {
+                $dg.Add_PreviewMouseWheel({
+                    param($sender, $e)
+                    try {
+                        if ([System.Windows.Input.Keyboard]::Modifiers -band [System.Windows.Input.ModifierKeys]::Shift) { return }
+                        if ($stackScrollViewer -and -not $e.Handled) {
+                            if ($rowCount -le 6) {
+                                $eventArg = New-Object System.Windows.Input.MouseWheelEventArgs($e.MouseDevice, $e.Timestamp, $e.Delta)
+                                $eventArg.RoutedEvent = [System.Windows.UIElement]::MouseWheelEvent
+                                $eventArg.Source = $sender
+                                $stackScrollViewer.RaiseEvent($eventArg)
+                                $e.Handled = $true
+                            }
+                        }
+                    } catch {}
+                }.GetNewClosure())
+            }
+
             [System.Windows.Controls.Grid]::SetRow($dg, 1)
             [void]$resultPanel.Children.Add($dg)
 
@@ -1420,7 +1446,9 @@ function Show-MultipleResultSets {
         [void]$headerPanel.Children.Add($iconText)
         [void]$headerPanel.Children.Add($titleText)
         $tab.Header = $headerPanel
-        $tab.Content = $stackGrid
+        
+        $stackScrollViewer.Content = $stackGrid
+        $tab.Content = $stackScrollViewer
 
         if ($permanentTabIndex -ge 0) {
             $TabControl.Items.Insert($permanentTabIndex, $tab)
