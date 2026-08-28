@@ -1,4 +1,4 @@
-﻿param(
+param(
     [string]$Branch = "release",
     [switch]$ForceUpdate
 )
