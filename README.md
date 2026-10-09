@@ -33,6 +33,7 @@ Suite de utilidades para soporte tecnico, administracion de Windows y operacione
 ### Asistente de Inteligencia Artificial (Gemini)
 
 - Integracion nativa con la API de Google Gemini.
+- Seleccion automatica del Flash estable mas reciente disponible para la API key, con respaldo en versiones anteriores ante errores de disponibilidad.
 - Generacion de consultas SQL a partir de lenguaje natural, analizando el contexto y esquema de tu base de datos.
 - Explicacion detallada de consultas complejas de manera automatica.
 - Interpretacion y explicacion de mensajes de error de SQL para facilitar el diagnostico.

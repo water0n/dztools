@@ -1,7 +1,7 @@
 ﻿#requires -Version 5.0
 
 $script:DzAiApiKey = $null
-$script:DzAiModel = "gemini-3.7-flash"
+$script:DzAiModel = "auto"
 $script:DzAiCurrentRunspace = $null
 $script:DzAiCurrentPowerShell = $null
 $script:DzAiCurrentAsync = $null
@@ -10,7 +10,7 @@ $script:DzAiCurrentJob = $null
 $script:DzAiCurrentResult = $null
 $script:DzAiCurrentStartedAt = $null
 $script:DzAiCurrentLastWaitLogAt = [DateTime]::MinValue
-$script:DzAiCurrentTimeoutSeconds = 100
+$script:DzAiCurrentTimeoutSeconds = 260
 
 function Write-DzAiDebug {
     param(
@@ -284,76 +284,102 @@ function Get-DzAiActiveQueryText {
     }
 }
 
+function Get-DzAiFlashModelCandidates {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$ApiKey)
+
+    $fallback = @('models/gemini-3.8-flash', 'models/gemini-3.6-flash', 'models/gemini-3.5-flash')
+    $available = New-Object System.Collections.Generic.List[object]
+    $pageToken = ""
+    try {
+        do {
+            $uri = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000"
+            if ($pageToken) { $uri += "&pageToken=$([uri]::EscapeDataString($pageToken))" }
+            $page = Invoke-RestMethod -Uri $uri -Method Get -Headers @{ 'x-goog-api-key' = $ApiKey } -TimeoutSec 30 -ErrorAction Stop
+            foreach ($model in @($page.models)) {
+                if ($model.name -notmatch '^models/gemini-(\d+)(?:\.(\d+))?-flash$') { continue }
+                if ($model.name -eq 'models/gemini-3.7-flash') { continue }
+                if ($model.supportedGenerationMethods -notcontains 'generateContent') { continue }
+                $minor = if ($Matches[2]) { [int]$Matches[2] } else { 0 }
+                $version = [version]("{0}.{1}" -f $Matches[1], $minor)
+                if ($version -lt [version]'3.5') { continue }
+                $available.Add([pscustomobject]@{ Name = [string]$model.name; Version = $version })
+            }
+            $pageToken = [string]$page.nextPageToken
+        } while ($pageToken)
+    } catch {
+        Write-DzAiDebug ("No se pudo listar modelos; usando respaldo fijo: {0}" -f $_.Exception.Message) ([System.ConsoleColor]::Yellow)
+        return $fallback
+    }
+
+    $candidates = @($available | Sort-Object Version -Descending | Select-Object -ExpandProperty Name -Unique -First 3)
+    if ($candidates.Count -eq 0) { throw "No hay modelos Flash estables con generateContent disponibles para esta API key." }
+    return $candidates
+}
+
 function Invoke-DzGeminiGenerateContent {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][string]$Prompt,
         [string]$SystemInstruction = "",
-        [string]$Model = "gemini-3.7-flash",
+        [string]$Model = "auto",
         [Parameter(Mandatory = $true)][string]$ApiKey,
         [double]$Temperature = 0.2,
-        [int]$MaxOutputTokens = 2048
+        [int]$MaxOutputTokens = 4096,
+        [switch]$IncludeMetadata
     )
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) { throw "No se ha capturado la API key de Gemini." }
-    if ([string]::IsNullOrWhiteSpace($Model)) { $Model = "gemini-3.7-flash" }
+    if ([string]::IsNullOrWhiteSpace($Model)) { $Model = "auto" }
     if ($MaxOutputTokens -lt 128) { $MaxOutputTokens = 128 }
 
-    $modelName = if ($Model -match '^models/') { $Model } else { "models/$Model" }
-    $uri = "https://generativelanguage.googleapis.com/v1beta/$modelName`:generateContent?key=$ApiKey"
-    Write-DzAiDebug "Invoke-DzGeminiGenerateContent modelo=$modelName uri=v1beta/...:generateContent" ([System.ConsoleColor]::Cyan)
-    $generationConfig = @{
-        maxOutputTokens = $MaxOutputTokens
+    $models = if ($Model -eq 'auto') {
+        @(Get-DzAiFlashModelCandidates -ApiKey $ApiKey)
+    } else {
+        @(if ($Model -match '^models/') { $Model } else { "models/$Model" })
     }
-    if ($modelName -notmatch 'gemini-3' -or $PSBoundParameters.ContainsKey('Temperature')) {
-        $generationConfig.temperature = $Temperature
-    }
-    $bodyObject = @{
-        contents = @(
-            @{
-                parts = @(@{ text = $Prompt })
-            }
-        )
-        generationConfig = $generationConfig
-    }
-    if ($modelName -match 'gemini-3\.[56]-flash' -or $modelName -match 'gemini-3-flash') {
-        $bodyObject.generationConfig.thinkingConfig = @{ thinkingLevel = "minimal" }
-    } elseif ($modelName -match 'gemini-2\.5') {
-        $bodyObject.generationConfig.thinkingConfig = @{ thinkingBudget = 0 }
-    }
-    if (-not [string]::IsNullOrWhiteSpace($SystemInstruction)) {
-        $bodyObject.systemInstruction = @{
-            parts = @(@{ text = $SystemInstruction })
+    $attemptErrors = New-Object System.Collections.Generic.List[string]
+
+    foreach ($modelName in $models) {
+        $generationConfig = @{ maxOutputTokens = $MaxOutputTokens }
+        if ($modelName -notmatch '^models/gemini-[3-9]' -or $PSBoundParameters.ContainsKey('Temperature')) {
+            $generationConfig.temperature = $Temperature
+        }
+        if ($modelName -match '^models/gemini-3\.[56]-flash$') {
+            $generationConfig.thinkingConfig = @{ thinkingLevel = 'minimal' }
+        } elseif ($modelName -match '^models/gemini-2\.5-flash$') {
+            $generationConfig.thinkingConfig = @{ thinkingBudget = 0 }
+        }
+        $bodyObject = @{
+            contents = @(@{ parts = @(@{ text = $Prompt }) })
+            generationConfig = $generationConfig
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SystemInstruction)) {
+            $bodyObject.systemInstruction = @{ parts = @(@{ text = $SystemInstruction }) }
+        }
+        $body = $bodyObject | ConvertTo-Json -Depth 12 -Compress
+        $uri = "https://generativelanguage.googleapis.com/v1beta/$($modelName):generateContent"
+        Write-DzAiDebug "Consultando $modelName" ([System.ConsoleColor]::Cyan)
+        try {
+            $response = Invoke-RestMethod -Method Post -Uri $uri -Headers @{ 'x-goog-api-key' = $ApiKey } -Body $body -ContentType 'application/json' -TimeoutSec 75 -ErrorAction Stop
+            $parts = @($response.candidates[0].content.parts | Where-Object { -not $_.thought -and $_.text } | ForEach-Object { [string]$_.text })
+            $text = $parts -join ''
+            if ([string]::IsNullOrWhiteSpace($text)) { throw "Gemini no devolvio texto." }
+            if ($IncludeMetadata) { return [pscustomobject]@{ Text = $text; Model = $modelName } }
+            return $text
+        } catch {
+            $message = $_.Exception.Message
+            if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $message = "$message $($_.ErrorDetails.Message)" }
+            $statusCode = 0
+            try { $statusCode = [int]$_.Exception.Response.StatusCode } catch {}
+            $attemptErrors.Add(("{0}: {1}" -f $modelName, $message))
+            $retryable = $statusCode -in @(404, 429, 500, 502, 503, 504) -or
+                $message -match 'No devolvio texto|timeout|timed out|temporarily unavailable|overloaded|RESOURCE_EXHAUSTED|UNAVAILABLE|\b(?:404|429|500|502|503|504)\b'
+            if (-not $retryable) { throw "Error llamando a Gemini: $message" }
+            Write-DzAiDebug ("Modelo no disponible: {0}. Probando el siguiente." -f $modelName) ([System.ConsoleColor]::Yellow)
         }
     }
-
-    $body = $bodyObject | ConvertTo-Json -Depth 12
-    $headers = @{
-        "Content-Type" = "application/json"
-    }
-
-    try {
-        Write-DzAiDebug ("Enviando request Gemini. PromptChars={0} BodyChars={1}" -f $Prompt.Length, $body.Length) ([System.ConsoleColor]::Cyan)
-        $response = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $body -ContentType "application/json" -TimeoutSec 75
-        Write-DzAiDebug "Respuesta HTTP recibida de Gemini." ([System.ConsoleColor]::Green)
-        $text = $response.candidates[0].content.parts[0].text
-        Write-DzAiDebug ("Texto Gemini recibido. Caracteres={0} FinishReason={1}" -f $text.Length, $response.candidates[0].finishReason) ([System.ConsoleColor]::Green)
-        if ([string]::IsNullOrWhiteSpace($text)) { throw "Gemini no devolvio texto." }
-        return $text
-    } catch {
-        $message = $_.Exception.Message
-        if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $message = "$message $($_.ErrorDetails.Message)" }
-        try {
-            $stream = $_.Exception.Response.GetResponseStream()
-            if ($stream) {
-                $reader = New-Object System.IO.StreamReader($stream)
-                $apiError = $reader.ReadToEnd()
-                if (-not [string]::IsNullOrWhiteSpace($apiError)) { $message = $apiError }
-            }
-        } catch {}
-        Write-DzAiDebug "Error Gemini: $message" ([System.ConsoleColor]::Red)
-        throw "Error llamando a Gemini: $message"
-    }
+    throw ("Ningun modelo Flash respondio. {0}" -f ($attemptErrors -join ' | '))
 }
 
 function Start-DzAiRequest {
@@ -383,7 +409,7 @@ function Start-DzAiRequest {
     Set-DzAiOutput $WorkingText
 
     $worker = {
-        param($Prompt, $SystemInstruction, $Model, $ApiKey)
+        param($Prompt, $SystemInstruction, $Model, $ApiKey, $ModulePath)
 
         function Send-WorkerLog {
             param([string]$Message)
@@ -391,91 +417,15 @@ function Start-DzAiRequest {
         }
 
         try {
-            Send-WorkerLog "Worker iniciado."
             [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            $fallback = if ($Model -match '^models/') { $Model } else { "models/$Model" }
-            $preferredModels = @(
-                'models/gemini-3.7-flash',
-                'models/gemini-3.6-flash',
-                'models/gemini-2.5-flash',
-                'models/gemini-2.0-flash',
-                'models/gemini-flash-latest',
-                'models/gemini-1.5-flash-latest'
-            )
-
-            $modelName = $fallback
-            try {
-                Send-WorkerLog "Consultando modelos disponibles..."
-                $modelsUri = "https://generativelanguage.googleapis.com/v1beta/models?key=$ApiKey"
-                $modelsResponse = Invoke-RestMethod -Uri $modelsUri -Method Get -TimeoutSec 30
-                $generateModels = @($modelsResponse.models | Where-Object { $_.supportedGenerationMethods -contains 'generateContent' })
-                foreach ($preferred in $preferredModels) {
-                    $match = $generateModels | Where-Object { $_.name -eq $preferred } | Select-Object -First 1
-                    if ($null -ne $match) {
-                        $modelName = $match.name
-                        break
-                    }
-                }
-                if ($modelName -eq $fallback -and $generateModels.Count -gt 0) {
-                    $modelName = $generateModels[0].name
-                }
-                Send-WorkerLog "Modelo seleccionado: $modelName"
-            } catch {
-                $msg = $_.Exception.Message
-                if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $msg = "$msg $($_.ErrorDetails.Message)" }
-                Send-WorkerLog "No se pudieron listar modelos. Usando fallback $fallback. Error: $msg"
-                $modelName = $fallback
-            }
-
-            $uri = "https://generativelanguage.googleapis.com/v1beta/$($modelName):generateContent?key=$ApiKey"
-            Send-WorkerLog "Preparando request generateContent. Modelo=$modelName PromptChars=$($Prompt.Length)"
-            $generationConfig = @{
-                maxOutputTokens = 900
-            }
-            if ($modelName -notmatch 'gemini-3') {
-                $generationConfig.temperature = 0.2
-            }
-            $bodyObject = @{
-                contents = @(
-                    @{
-                        parts = @(@{ text = $Prompt })
-                    }
-                )
-                generationConfig = $generationConfig
-            }
-            if ($modelName -match 'gemini-3\.[56]-flash' -or $modelName -match 'gemini-3-flash') {
-                $bodyObject.generationConfig.thinkingConfig = @{ thinkingLevel = "minimal" }
-            } elseif ($modelName -match 'gemini-2\.5') {
-                $bodyObject.generationConfig.thinkingConfig = @{ thinkingBudget = 0 }
-            }
-            if (-not [string]::IsNullOrWhiteSpace($SystemInstruction)) {
-                $bodyObject.systemInstruction = @{ parts = @(@{ text = $SystemInstruction }) }
-            }
-            $body = $bodyObject | ConvertTo-Json -Depth 12 -Compress
-            $headers = @{
-                "Content-Type" = "application/json"
-            }
-            Send-WorkerLog "Enviando request a Gemini. BodyChars=$($body.Length)"
-            $response = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $body -ContentType "application/json" -TimeoutSec 90
-            Send-WorkerLog "Respuesta recibida de Gemini."
-            if ($response.candidates -and $response.candidates[0].finishReason) {
-                Send-WorkerLog "FinishReason=$($response.candidates[0].finishReason)"
-            }
-            $text = $response.candidates[0].content.parts[0].text
-            if ([string]::IsNullOrWhiteSpace($text)) { throw "Gemini no devolvio texto." }
-            Send-WorkerLog "Texto recibido. Caracteres=$($text.Length)"
-            Write-Output @{ type = 'result'; Ok = $true; Text = $text }
+            Import-Module -Name $ModulePath -Force -DisableNameChecking -ErrorAction Stop
+            Send-WorkerLog "Buscando el mejor modelo Flash disponible..."
+            $answer = Invoke-DzGeminiGenerateContent -Prompt $Prompt -SystemInstruction $SystemInstruction -Model $Model -ApiKey $ApiKey -MaxOutputTokens 4096 -IncludeMetadata
+            Send-WorkerLog "Modelo que respondio: $($answer.Model)"
+            Write-Output @{ type = 'result'; Ok = $true; Text = $answer.Text; Model = $answer.Model }
         } catch {
             $message = $_.Exception.Message
             if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $message = "$message $($_.ErrorDetails.Message)" }
-            try {
-                $stream = $_.Exception.Response.GetResponseStream()
-                if ($stream) {
-                    $reader = New-Object System.IO.StreamReader($stream)
-                    $apiError = $reader.ReadToEnd()
-                    if (-not [string]::IsNullOrWhiteSpace($apiError)) { $message = $apiError }
-                }
-            } catch {}
             Send-WorkerLog "ERROR: $message"
             Write-Output @{ type = 'result'; Ok = $false; Error = $message }
         }
@@ -488,7 +438,8 @@ function Start-DzAiRequest {
         $Prompt,
         $SystemInstruction,
         $script:DzAiModel,
-        $script:DzAiApiKey
+        $script:DzAiApiKey,
+        (Join-Path $PSScriptRoot 'AI.psm1')
     )
     $script:DzAiCurrentJob = $job
     $startedAt = $script:DzAiCurrentStartedAt
@@ -588,7 +539,7 @@ function Start-DzAiRequest {
                     & $OnSuccess ([string]$result.Text)
                 } else {
                     Set-DzAiOutput ([string]$result.Text)
-                    Set-DzAiStatus "Gemini listo"
+                    Set-DzAiStatus ("Gemini listo ({0})" -f $result.Model)
                 }
             } else {
                 $err = if ($result -and $result.Error) { [string]$result.Error } else { "Error desconocido llamando a Gemini." }
