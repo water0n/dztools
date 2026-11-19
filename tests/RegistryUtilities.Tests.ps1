@@ -522,13 +522,20 @@ FileSystemEffectivePhysicalBytesPerSectorForAtomicity :   16.384
             $job = Start-Job -ScriptBlock {
                 param($Path)
                 Import-Module $Path -Force -DisableNameChecking -ErrorAction Stop
-                Invoke-NvmeSystemAnalysis
+                Invoke-NvmeSystemAnalysis -IncludeSqlLogs -StreamJobProgress
             } -ArgumentList $modPath
             try {
                 Wait-Job -Job $job -Timeout 25 | Out-Null
                 $job.State | Should -Be 'Completed'
-                $res = Receive-Job -Job $job
-                $res | Should -Not -BeNullOrEmpty
+                $items = @(Receive-Job -Job $job)
+                $progressItems = @($items | Where-Object { $_.Type -eq 'Progress' })
+                $resultItem = $items | Where-Object { $_.Type -eq 'Result' } | Select-Object -Last 1
+
+                $progressItems.Count | Should -BeGreaterOrEqual 5
+                $resultItem | Should -Not -BeNullOrEmpty
+                $resultItem.Ok | Should -BeTrue
+                $res = $resultItem.Analysis
+                $res.SqlLogs.HasFindings | Should -BeOfType [bool]
                 $res.Verdict | Should -Not -BeNullOrEmpty
                 $res.Verdict.Status | Should -BeIn @('Candidate', 'AlreadyAppliedPendingReboot', 'AlreadyFixed', 'UnsupportedDriver', 'NotCandidate')
             } finally {

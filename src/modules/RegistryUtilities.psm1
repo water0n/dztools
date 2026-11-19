@@ -1527,15 +1527,26 @@ function Invoke-NvmeSystemAnalysis {
     param(
         [switch]$IncludeSqlLogs,
         [string]$RootPath = $script:NvmeDefaultRegistryRoot,
-        [string[]]$LogDirectories
+        [string[]]$LogDirectories,
+        [switch]$StreamJobProgress
     )
 
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    if ($StreamJobProgress) { Write-Output ([PSCustomObject]@{ Type = 'Progress'; Percent = 15; Message = 'Consultando versión de Windows...' }) }
     $osInfo = Get-NvmeOsInfo
+
+    if ($StreamJobProgress) { Write-Output ([PSCustomObject]@{ Type = 'Progress'; Percent = 30; Message = 'Detectando discos NVMe y controlador (stornvme)...' }) }
     $diskInfo = Get-NvmeDiskInfo -ServiceRegistryPath $RootPath
+
+    if ($StreamJobProgress) { Write-Output ([PSCustomObject]@{ Type = 'Progress'; Percent = 55; Message = 'Analizando sectores físicos de volúmenes NVMe...' }) }
     $sectorDiag = Get-NvmeSectorDiagnostics -DiskInfo $diskInfo
+
+    if ($StreamJobProgress) { Write-Output ([PSCustomObject]@{ Type = 'Progress'; Percent = 75; Message = 'Inspeccionando clave stornvme en el Registro...' }) }
     $regState = Get-NvmeRegistryState -RootPath $RootPath
 
+    if ($IncludeSqlLogs -and $StreamJobProgress) {
+        Write-Output ([PSCustomObject]@{ Type = 'Progress'; Percent = 88; Message = 'Revisando ERRORLOG de SQL Server...' })
+    }
     $sqlLogs = if ($IncludeSqlLogs) {
         if ($PSBoundParameters.ContainsKey('LogDirectories')) {
             Find-SqlMisalignedIoErrors -LogDirectories $LogDirectories
@@ -1553,6 +1564,7 @@ function Invoke-NvmeSystemAnalysis {
         }
     }
 
+    if ($StreamJobProgress) { Write-Output ([PSCustomObject]@{ Type = 'Progress'; Percent = 95; Message = 'Evaluando dictamen de elegibilidad...' }) }
     $verdict = Test-NvmeSqlFixCandidate `
         -OsInfo $osInfo `
         -DiskInfo $diskInfo `
@@ -1562,7 +1574,7 @@ function Invoke-NvmeSystemAnalysis {
 
     $sw.Stop()
 
-    return [PSCustomObject]@{
+    $analysisObj = [PSCustomObject]@{
         OsInfo            = $osInfo
         DiskInfo          = $diskInfo
         SectorDiagnostics = $sectorDiag
@@ -1572,6 +1584,18 @@ function Invoke-NvmeSystemAnalysis {
         ElapsedMs         = [int]$sw.ElapsedMilliseconds
         AnalyzedAt        = (Get-Date).ToString('o')
     }
+
+    if ($StreamJobProgress) {
+        Write-Output ([PSCustomObject]@{
+            Type     = 'Result'
+            Ok       = $true
+            Analysis = $analysisObj
+            Error    = $null
+        })
+        return
+    }
+
+    return $analysisObj
 }
 
 #endregion
@@ -2143,6 +2167,208 @@ function Show-NvmeBackupPickerDialog {
     return $pickState.Selected
 }
 
+function Start-NvmeDialogAsyncAnalysis {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        $Context
+    )
+
+    if ($Context.IsAnalyzing -or $Context.IsClosing) { return }
+    $Context.IsAnalyzing = $true
+    $Context.PendingJobResult = $null
+    $Context.LastProgressPercent = 5
+    & $Context.UpdateButtonStates
+    & $Context.SetStatus 'Analizando sistema (discos NVMe, fsutil, Registro y SQL ERRORLOG)...' 'Info'
+
+    $c = $Context.Controls
+    $w = $Context.Window
+    $includeSql = ($c['chkIncludeSqlLogs'].IsChecked -eq $true)
+    $modPath = $Context.ModulePath
+
+    $progressWin = $null
+    if (Get-Command Show-WpfProgressBar -ErrorAction SilentlyContinue) {
+        $progressWin = Show-WpfProgressBar `
+            -Title 'Analizando sistema NVMe' `
+            -Message 'Iniciando motor de diagnóstico NVMe y SQL...' `
+            -Owner $w `
+            -IsIndeterminate $false `
+            -BlockOwner `
+            -ProgrammaticCloseOnly
+        if ($progressWin -and (Get-Command Update-WpfProgressBar -ErrorAction SilentlyContinue)) {
+            Update-WpfProgressBar -Window $progressWin -Percent 5 -Message 'Iniciando diagnóstico en segundo plano...'
+        }
+    }
+    $Context.ProgressWindow = $progressWin
+
+    $workerBlock = {
+        param([string]$ModulePath, [bool]$ScanSql)
+        try {
+            Import-Module $ModulePath -Force -DisableNameChecking -ErrorAction Stop
+            Invoke-NvmeSystemAnalysis -IncludeSqlLogs:$ScanSql -StreamJobProgress
+        } catch {
+            Write-Output ([PSCustomObject]@{
+                Type     = 'Result'
+                Ok       = $false
+                Analysis = $null
+                Error    = $_.Exception.Message
+            })
+        }
+    }
+
+    try {
+        $job = Start-Job -ScriptBlock $workerBlock -ArgumentList $modPath, $includeSql -ErrorAction Stop
+        $Context.Job = $job
+
+        $timer = [System.Windows.Threading.DispatcherTimer]::new()
+        $timer.Interval = [TimeSpan]::FromMilliseconds(200)
+        $Context.Timer = $timer
+
+        $timer.Add_Tick({
+            if ($Context.IsClosing) {
+                $timer.Stop()
+                return
+            }
+
+            $j = $Context.Job
+            if (-not $j) {
+                $timer.Stop()
+                return
+            }
+
+            $streamItems = @(Receive-Job -Job $j -ErrorAction SilentlyContinue)
+            $gotProgress = $false
+            foreach ($item in $streamItems) {
+                if (-not $item) { continue }
+                if ($item.PSObject.Properties['Type']) {
+                    if ($item.Type -eq 'Progress') {
+                        $gotProgress = $true
+                        $pct = [int]$item.Percent
+                        if ($pct -gt $Context.LastProgressPercent) { $Context.LastProgressPercent = $pct }
+                        if ($Context.ProgressWindow -and (Get-Command Update-WpfProgressBar -ErrorAction SilentlyContinue)) {
+                            Update-WpfProgressBar -Window $Context.ProgressWindow -Percent $Context.LastProgressPercent -Message ([string]$item.Message)
+                        }
+                        & $Context.SetStatus ([string]$item.Message) 'Info'
+                    } elseif ($item.Type -eq 'Result') {
+                        $Context.PendingJobResult = $item
+                    }
+                } elseif ($null -ne $item.PSObject.Properties['Ok']) {
+                    $Context.PendingJobResult = $item
+                }
+            }
+
+            if ($j.State -notin @('Completed', 'Failed', 'Stopped')) {
+                if (-not $gotProgress -and $Context.LastProgressPercent -lt 14) {
+                    $Context.LastProgressPercent = [int]$Context.LastProgressPercent + 1
+                    if ($Context.ProgressWindow -and (Get-Command Update-WpfProgressBar -ErrorAction SilentlyContinue)) {
+                        Update-WpfProgressBar -Window $Context.ProgressWindow -Percent $Context.LastProgressPercent
+                    }
+                }
+                return
+            }
+
+            $timer.Stop()
+            $Context.Timer = $null
+            $jobResult = $Context.PendingJobResult
+            $jobErr = $null
+
+            try {
+                $tailItems = @(Receive-Job -Job $j -ErrorAction SilentlyContinue)
+                foreach ($item in $tailItems) {
+                    if ($item -and (($item.PSObject.Properties['Type'] -and $item.Type -eq 'Result') -or ($null -ne $item.PSObject.Properties['Ok']))) {
+                        $jobResult = $item
+                    }
+                }
+
+                if (-not $jobResult -or -not $jobResult.Ok) {
+                    if ($jobResult -and $jobResult.Error) {
+                        $jobErr = [string]$jobResult.Error
+                    } elseif ($j.ChildJobs.Count -gt 0 -and $j.ChildJobs[0].JobStateInfo.Reason) {
+                        $jobErr = $j.ChildJobs[0].JobStateInfo.Reason.Message
+                    } else {
+                        $jobErr = 'El análisis finalizó sin devolver resultado.'
+                    }
+                } elseif ($Context.ProgressWindow -and (Get-Command Update-WpfProgressBar -ErrorAction SilentlyContinue)) {
+                    Update-WpfProgressBar -Window $Context.ProgressWindow -Percent 100 -Message 'Análisis completado.'
+                }
+            } catch {
+                $jobErr = $_.Exception.Message
+            } finally {
+                try { Remove-Job -Job $j -Force -ErrorAction SilentlyContinue } catch { Write-Verbose $_.Exception.Message }
+                $Context.Job = $null
+                $Context.PendingJobResult = $null
+                $Context.IsAnalyzing = $false
+                if ($Context.ProgressWindow) {
+                    if (Get-Command Close-WpfProgressBar -ErrorAction SilentlyContinue) {
+                        Close-WpfProgressBar -Window $Context.ProgressWindow
+                    }
+                    $Context.ProgressWindow = $null
+                }
+            }
+
+            if ($jobErr) {
+                & $Context.UpdateButtonStates
+                & $Context.SetStatus "Error en el análisis: $jobErr" 'Error'
+                $Context.Controls['txtTechLog'].Text = "Error ejecutando análisis:`r`n$jobErr"
+                $Context.PendingPostApplyInfo = $null
+                $Context.PendingPostRestoreMessage = $null
+                return
+            }
+
+            $rawAnalysis = $jobResult.Analysis
+            $recomputedVerdict = Test-NvmeSqlFixCandidate `
+                -OsInfo $rawAnalysis.OsInfo `
+                -DiskInfo $rawAnalysis.DiskInfo `
+                -SectorDiagnostics $rawAnalysis.SectorDiagnostics `
+                -RegistryState $rawAnalysis.RegistryState `
+                -SqlLogResult $rawAnalysis.SqlLogs
+
+            $analysisData = [PSCustomObject]@{
+                OsInfo            = $rawAnalysis.OsInfo
+                DiskInfo          = $rawAnalysis.DiskInfo
+                SectorDiagnostics = $rawAnalysis.SectorDiagnostics
+                RegistryState     = $rawAnalysis.RegistryState
+                SqlLogs           = $rawAnalysis.SqlLogs
+                Verdict           = $recomputedVerdict
+                ElapsedMs         = [int]$rawAnalysis.ElapsedMs
+                AnalyzedAt        = [string]$rawAnalysis.AnalyzedAt
+            }
+
+            & $Context.RenderAnalysis $analysisData
+
+            if ($Context.PendingPostApplyInfo) {
+                $applyInfo = $Context.PendingPostApplyInfo
+                $Context.PendingPostApplyInfo = $null
+                $rebootPrompt = "La corrección NVMe se aplicó y verificó correctamente.`n`nRespaldo guardado en:`n$($applyInfo.JsonPath)`n`nEs necesario reiniciar Windows para que el driver stornvme aplique el tamaño de sector de 4 KB.`n¿Desea reiniciar el equipo ahora?"
+                if (& $Context.UiConfirm $rebootPrompt 'Reinicio requerido') {
+                    & shutdown.exe /r /t 10 /c 'Reinicio para aplicar emulacion de sector 4KB NVMe para SQL Server'
+                } else {
+                    Show-WpfMessageBoxSafe -Message 'Recuerde reiniciar Windows manualmente antes de instalar o iniciar SQL Server.' -Title 'Reinicio pendiente' -Buttons 'OK' -Icon 'Information' -Owner $Context.Window | Out-Null
+                }
+            } elseif ($Context.PendingPostRestoreMessage) {
+                $restoreInfo = $Context.PendingPostRestoreMessage
+                $Context.PendingPostRestoreMessage = $null
+                $rebootRestorePrompt = "$($restoreInfo.Message)`n`nRespaldo manual .reg disponible en: $($restoreInfo.ManualRegFilePath)`n`nPara que el controlador stornvme recargue el estado restaurado puede ser necesario reiniciar Windows.`n¿Desea reiniciar el equipo ahora?"
+                if (& $Context.UiConfirm $rebootRestorePrompt 'Restauración completada') {
+                    & shutdown.exe /r /t 10 /c 'Reinicio tras restauracion de configuracion NVMe en Registro'
+                }
+            }
+        }.GetNewClosure())
+
+        $timer.Start()
+    } catch {
+        $Context.IsAnalyzing = $false
+        if ($Context.ProgressWindow) {
+            if (Get-Command Close-WpfProgressBar -ErrorAction SilentlyContinue) {
+                Close-WpfProgressBar -Window $Context.ProgressWindow
+            }
+            $Context.ProgressWindow = $null
+        }
+        & $Context.UpdateButtonStates
+        & $Context.SetStatus "No se pudo iniciar el análisis asíncrono: $($_.Exception.Message)" 'Error'
+    }
+}
+
 <#
 .SYNOPSIS
 Abre el modal WPF para diagnóstico, respaldo, aplicación y reversión de la corrección NVMe 4KB.
@@ -2553,16 +2779,28 @@ function Show-NvmeRegFixDialog {
         $c['borderAdminWarning'].Visibility = [System.Windows.Visibility]::Visible
     }
 
+    $fnStartAsync = ${function:Start-NvmeDialogAsyncAnalysis}
+    $fnFormatLog = ${function:Format-NvmeDiagnosticLog}
+    $fnPickBackup = ${function:Show-NvmeBackupPickerDialog}
+
     $uiState = [ordered]@{
         IsAdmin                   = $isAdmin
         IsAnalyzing               = $false
         IsClosing                 = $false
         BackupRoot                = $backupRoot
         ModulePath                = $script:RegistryUtilitiesModulePath
+        Window                    = $w
+        Controls                  = $c
         LastAnalysis              = $null
         LastVerdict               = $null
         Job                       = $null
         Timer                     = $null
+        ProgressWindow            = $null
+        PendingJobResult          = $null
+        UpdateButtonStates        = $null
+        RenderAnalysis            = $null
+        SetStatus                 = $null
+        UiConfirm                 = $null
         AppendLogAfterAnalysis    = $null
         PendingPostApplyInfo      = $null
         PendingPostRestoreMessage = $null
@@ -2572,6 +2810,7 @@ function Show-NvmeRegFixDialog {
         param([string]$Message, [string]$Title = 'Confirmar')
         (Show-WpfMessageBoxSafe -Message $Message -Title $Title -Buttons 'YesNo' -Icon 'Question' -Owner $w) -eq [System.Windows.MessageBoxResult]::Yes
     }.GetNewClosure()
+    $uiState.UiConfirm = $UiConfirm
 
     $setStatus = {
         param([string]$Text, [string]$Level = 'Info')
@@ -2583,6 +2822,7 @@ function Show-NvmeRegFixDialog {
             default { $c['lblStatus'].SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, 'PanelFg') }
         }
     }.GetNewClosure()
+    $uiState.SetStatus = $setStatus
 
     $updateButtonStates = {
         if ($uiState.IsAnalyzing) {
@@ -2639,6 +2879,7 @@ function Show-NvmeRegFixDialog {
             }
         }
     }.GetNewClosure()
+    $uiState.UpdateButtonStates = $updateButtonStates
 
     $renderAnalysis = {
         param($Analysis)
@@ -2694,7 +2935,7 @@ function Show-NvmeRegFixDialog {
             }
         }
 
-        $c['txtTechLog'].Text = Format-NvmeDiagnosticLog -Analysis $Analysis
+        $c['txtTechLog'].Text = & $fnFormatLog -Analysis $Analysis
         if (-not [string]::IsNullOrWhiteSpace($uiState.AppendLogAfterAnalysis)) {
             $c['txtTechLog'].AppendText($uiState.AppendLogAfterAnalysis)
             $c['txtTechLog'].ScrollToEnd()
@@ -2721,124 +2962,7 @@ function Show-NvmeRegFixDialog {
         & $updateButtonStates
         & $setStatus "Análisis completado en $($Analysis.ElapsedMs) ms. Dictamen: $($v.Status)." 'Ok'
     }.GetNewClosure()
-
-    $startAnalysisAsync = {
-        if ($uiState.IsAnalyzing -or $uiState.IsClosing) { return }
-        $uiState.IsAnalyzing = $true
-        & $updateButtonStates
-        & $setStatus 'Analizando sistema (discos NVMe, fsutil, Registro y SQL ERRORLOG)...' 'Info'
-
-        $includeSql = ($c['chkIncludeSqlLogs'].IsChecked -eq $true)
-        $modPath = $uiState.ModulePath
-
-        $workerBlock = {
-            param([string]$ModulePath, [bool]$ScanSql)
-            try {
-                Import-Module $ModulePath -Force -DisableNameChecking -ErrorAction Stop
-                $analysis = Invoke-NvmeSystemAnalysis -IncludeSqlLogs:$ScanSql
-                return [PSCustomObject]@{
-                    Ok       = $true
-                    Analysis = $analysis
-                    Error    = $null
-                }
-            } catch {
-                return [PSCustomObject]@{
-                    Ok       = $false
-                    Analysis = $null
-                    Error    = $_.Exception.Message
-                }
-            }
-        }
-
-        try {
-            $job = Start-Job -ScriptBlock $workerBlock -ArgumentList $modPath, $includeSql -ErrorAction Stop
-            $uiState.Job = $job
-
-            $timer = [System.Windows.Threading.DispatcherTimer]::new()
-            $timer.Interval = [TimeSpan]::FromMilliseconds(200)
-            $uiState.Timer = $timer
-
-            $timer.Add_Tick({
-                if ($uiState.IsClosing) {
-                    $timer.Stop()
-                    return
-                }
-                $j = $uiState.Job
-                if (-not $j -or $j.State -notin @('Completed', 'Failed', 'Stopped')) {
-                    return
-                }
-
-                $timer.Stop()
-                $uiState.Timer = $null
-                $jobResult = $null
-                $jobErr = $null
-
-                try {
-                    $output = @(Receive-Job -Job $j -ErrorAction SilentlyContinue)
-                    $jobResult = $output | Where-Object { $_ -and $null -ne $_.PSObject.Properties['Ok'] } | Select-Object -Last 1
-                    if (-not $jobResult -or -not $jobResult.Ok) {
-                        if ($jobResult -and $jobResult.Error) {
-                            $jobErr = [string]$jobResult.Error
-                        } elseif ($j.ChildJobs.Count -gt 0 -and $j.ChildJobs[0].JobStateInfo.Reason) {
-                            $jobErr = $j.ChildJobs[0].JobStateInfo.Reason.Message
-                        } else {
-                            $jobErr = 'El análisis finalizó sin devolver resultado.'
-                        }
-                    }
-                } catch {
-                    $jobErr = $_.Exception.Message
-                } finally {
-                    try { Remove-Job -Job $j -Force -ErrorAction SilentlyContinue } catch { Write-Verbose $_.Exception.Message }
-                    $uiState.Job = $null
-                    $uiState.IsAnalyzing = $false
-                }
-
-                if ($jobErr) {
-                    & $updateButtonStates
-                    & $setStatus "Error en el análisis: $jobErr" 'Error'
-                    $c['txtTechLog'].Text = "Error ejecutando análisis:`r`n$jobErr"
-                    $uiState.PendingPostApplyInfo = $null
-                    $uiState.PendingPostRestoreMessage = $null
-                    return
-                }
-
-                $analysisData = $jobResult.Analysis
-                # Re-evaluar Test-NvmeSqlFixCandidate (función pura) en el hilo UI con objetos completos
-                $analysisData.Verdict = Test-NvmeSqlFixCandidate `
-                    -OsInfo $analysisData.OsInfo `
-                    -DiskInfo $analysisData.DiskInfo `
-                    -SectorDiagnostics $analysisData.SectorDiagnostics `
-                    -RegistryState $analysisData.RegistryState `
-                    -SqlLogResult $analysisData.SqlLogs
-
-                & $renderAnalysis $analysisData
-
-                if ($uiState.PendingPostApplyInfo) {
-                    $applyInfo = $uiState.PendingPostApplyInfo
-                    $uiState.PendingPostApplyInfo = $null
-                    $rebootPrompt = "La corrección NVMe se aplicó y verificó correctamente.`n`nRespaldo guardado en:`n$($applyInfo.JsonPath)`n`nEs necesario reiniciar Windows para que el driver stornvme aplique el tamaño de sector de 4 KB.`n¿Desea reiniciar el equipo ahora?"
-                    if (& $UiConfirm $rebootPrompt 'Reinicio requerido') {
-                        & shutdown.exe /r /t 10 /c 'Reinicio para aplicar emulacion de sector 4KB NVMe para SQL Server'
-                    } else {
-                        Show-WpfMessageBoxSafe -Message 'Recuerde reiniciar Windows manualmente antes de instalar o iniciar SQL Server.' -Title 'Reinicio pendiente' -Buttons 'OK' -Icon 'Information' -Owner $w | Out-Null
-                    }
-                } elseif ($uiState.PendingPostRestoreMessage) {
-                    $restoreInfo = $uiState.PendingPostRestoreMessage
-                    $uiState.PendingPostRestoreMessage = $null
-                    $rebootRestorePrompt = "$($restoreInfo.Message)`n`nRespaldo manual .reg disponible en: $($restoreInfo.ManualRegFilePath)`n`nPara que el controlador stornvme recargue el estado restaurado puede ser necesario reiniciar Windows.`n¿Desea reiniciar el equipo ahora?"
-                    if (& $UiConfirm $rebootRestorePrompt 'Restauración completada') {
-                        & shutdown.exe /r /t 10 /c 'Reinicio tras restauracion de configuracion NVMe en Registro'
-                    }
-                }
-            }.GetNewClosure())
-
-            $timer.Start()
-        } catch {
-            $uiState.IsAnalyzing = $false
-            & $updateButtonStates
-            & $setStatus "No se pudo iniciar el análisis asíncrono: $($_.Exception.Message)" 'Error'
-        }
-    }.GetNewClosure()
+    $uiState.RenderAnalysis = $renderAnalysis
 
     $w.WindowStartupLocation = 'Manual'
     $w.Add_Loaded({
@@ -2873,6 +2997,12 @@ function Show-NvmeRegFixDialog {
             try { Remove-Job -Job $uiState.Job -Force -ErrorAction SilentlyContinue } catch { Write-Verbose $_.Exception.Message }
             $uiState.Job = $null
         }
+        if ($uiState.ProgressWindow) {
+            if (Get-Command Close-WpfProgressBar -ErrorAction SilentlyContinue) {
+                try { Close-WpfProgressBar -Window $uiState.ProgressWindow } catch { Write-Verbose $_.Exception.Message }
+            }
+            $uiState.ProgressWindow = $null
+        }
     }.GetNewClosure())
 
     $c['HeaderBar'].Add_MouseLeftButtonDown({
@@ -2881,7 +3011,7 @@ function Show-NvmeRegFixDialog {
     $c['btnClose'].Add_Click({ $w.Close() })
     $c['btnCloseFooter'].Add_Click({ $w.Close() })
 
-    $c['btnAnalyze'].Add_Click({ & $startAnalysisAsync }.GetNewClosure())
+    $c['btnAnalyze'].Add_Click({ & $fnStartAsync -Context $uiState }.GetNewClosure())
 
     $c['chkAdvancedMode'].Add_Checked({
         if ($uiState.LastVerdict -and $uiState.LastVerdict.Status -ne 'Candidate') {
@@ -2947,7 +3077,7 @@ function Show-NvmeRegFixDialog {
         $c['chkAdvancedMode'].IsChecked = $false
         $uiState.AppendLogAfterAnalysis = "`r`n`r`n[APLICACIÓN EXITOSA - $($res.BackupId)]`r`nRespaldo JSON: $($res.JsonPath)`r`nRespaldo REG: $($res.RegPath)`r`n$($res.RegQueryOutput)"
         $uiState.PendingPostApplyInfo = $res
-        & $startAnalysisAsync
+        & $fnStartAsync -Context $uiState
     }.GetNewClosure())
 
     $c['btnRestore'].Add_Click({
@@ -2962,7 +3092,7 @@ function Show-NvmeRegFixDialog {
         $chosen = if ($backups.Count -eq 1) {
             $backups[0]
         } else {
-            Show-NvmeBackupPickerDialog -Backups $backups -Theme $theme -Owner $w
+            & $fnPickBackup -Backups $backups -Theme $theme -Owner $w
         }
 
         if (-not $chosen) { return }
@@ -2988,7 +3118,7 @@ function Show-NvmeRegFixDialog {
         $c['chkAdvancedMode'].IsChecked = $false
         $uiState.AppendLogAfterAnalysis = "`r`n`r`n[RESTAURACIÓN EXITOSA - $($res.BackupId)]`r`n$($res.Message)`r`n$($res.RegQueryOutput)"
         $uiState.PendingPostRestoreMessage = $res
-        & $startAnalysisAsync
+        & $fnStartAsync -Context $uiState
     }.GetNewClosure())
 
     & $updateButtonStates
