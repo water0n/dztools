@@ -63,6 +63,7 @@ Suite de utilidades para soporte tecnico, administracion de Windows y operacione
 - Creacion de usuarios locales como usuario estandar o administrador.
 - Limpieza de AnyDesk.
 - Consulta de componentes del sistema.
+- Diagnostico y correccion de sector fisico NVMe 4KB (`ForcedPhysicalSectorSizeInBytes`) en Registro para SQL Server, con respaldo y reversion.
 
 ### Impresoras
 
@@ -166,6 +167,7 @@ dztools/
 |       |-- Installers.psm1
 |       |-- NationalUtilities.psm1
 |       |-- QueriesPad.psm1
+|       |-- RegistryUtilities.psm1
 |       |-- SqlOps.psm1
 |       |-- SqlTreeView.psm1
 |       |-- Utilities.psm1

@@ -1452,7 +1452,25 @@ function Get-MainWindowXaml {
 
                         <StackPanel Grid.Column="1" Margin="0,0,10,0" VerticalAlignment="Top">
                             <Button Content="🔐 Lector DP - Permisos" Name="btnLectorDPicacls" Margin="0,0,0,10" Style="{StaticResource PermissionButtonStyle}"/>
-                            <Button Content="📦 Buscar Instalador LZMA" Name="LZMAbtnBuscarCarpeta" Margin="0,0,0,10" Style="{StaticResource PackageButtonStyle}"/>
+                            <Grid Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="6"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Button Grid.Column="0"
+                                        Content="📦 LZMA"
+                                        Name="LZMAbtnBuscarCarpeta"
+                                        Padding="4,6"
+                                        ToolTip="Buscar y renombrar instaladores LZMA en el Registro (Advanced Installer)"
+                                        Style="{StaticResource PackageButtonStyle}"/>
+                                <Button Grid.Column="2"
+                                        Content="💾 NVMe 4KB Reg"
+                                        Name="btnNvmeRegFix"
+                                        Padding="4,6"
+                                        ToolTip="Analizar discos NVMe/M.2 y corregir sector físico 4KB en Registro para SQL Server"
+                                        Style="{StaticResource PackageButtonStyle}"/>
+                            </Grid>
                             <Button Content="🌐 Agregar IPs" Name="btnConfigurarIPs" Margin="0,0,0,10" Style="{StaticResource NetworkButtonStyle}"/>
                             <Button Content="👤 Agregar usuario de Windows" Name="btnAddUser" Margin="0,0,0,10" Style="{StaticResource UserButtonStyle}"/>
                             <Button Content="🛡️ Configuraciones de Firewall" Name="btnFirewallConfig" Margin="0,0,0,10" Style="{StaticResource SecurityButtonStyle}"/>

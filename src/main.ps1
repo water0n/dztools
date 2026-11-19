@@ -28,7 +28,7 @@ function Write-Log {
 }
 Write-Host "`nImportando módulos..." -ForegroundColor Yellow
 $modulesPath = Join-Path $PSScriptRoot "modules"
-$modules = @("GUI.psm1", "Database.psm1", "Utilities.psm1", "SqliteOps.psm1", "CloudBackup.psm1", "SqlTreeView.psm1", "Installers.psm1", "WindowsUtilities.psm1", "NationalUtilities.psm1", "SqlOps.psm1", "QueriesPad.psm1", "AISqlContext.psm1", "AI.psm1")
+$modules = @("GUI.psm1", "Database.psm1", "Utilities.psm1", "SqliteOps.psm1", "CloudBackup.psm1", "SqlTreeView.psm1", "Installers.psm1", "WindowsUtilities.psm1", "NationalUtilities.psm1", "SqlOps.psm1", "QueriesPad.psm1", "AISqlContext.psm1", "AI.psm1", "RegistryUtilities.psm1")
 foreach ($module in $modules) {
     $modulePath = Join-Path $modulesPath $module
     if (Test-Path $modulePath) {
@@ -47,6 +47,7 @@ foreach ($module in $modules) {
 }
 $global:defaultInstructions = @"
 ----- CAMBIOS -----
+- Se agregó herramienta de diagnóstico y corrección NVMe 4KB (Regedit) para SQL Server
 - Se agregó botón para SQLite Browser (dzSQLite)
     * Se agregó opción para incluir el respaldo de la base de datos en el mismo archivo comprimido.
 - Subida a CloudFare Buckets
@@ -149,6 +150,7 @@ function New-MainForm {
     $btnPrinterTool = $window.FindName("btnPrinterTool")
     $btnLectorDPicacls = $window.FindName("btnLectorDPicacls")
     $LZMAbtnBuscarCarpeta = $window.FindName("LZMAbtnBuscarCarpeta")
+    $btnNvmeRegFix = $window.FindName("btnNvmeRegFix")
     $btnConfigurarIPs = $window.FindName("btnConfigurarIPs")
     $btnAddUser = $window.FindName("btnAddUser")
     $btnFirewallConfig = $window.FindName("btnFirewallConfig")
@@ -439,7 +441,7 @@ function New-MainForm {
             Write-DzDebug "`t[DEBUG] Error aplicando credenciales iniciales: $_" -Color Yellow
         }
     }
-    $buttonsToUpdate = @($LZMAbtnBuscarCarpeta, $btnInstalarHerramientas, $btnFirewallConfig, $btnProfiler, $btnDatabase, $btnSQLManager, $btnSQLManagement, $btnPrinterTool, $btnLectorDPicacls, $btnConfigurarIPs, $btnAddUser, $btnForzarActualizacion, $btnClearAnyDesk, $btnShowPrinters, $btnInstallPrinter, $btnClearPrintJobs, $btnAplicacionesNS, $btnCheckPermissions, $btnCambiarOTM, $btnCreateAPK, $btnExtractInstaller, $btnInstaladoresNS, $btnRegisterDlls, $btnMonitorServiciosLog, $btndzSQLite)
+    $buttonsToUpdate = @($LZMAbtnBuscarCarpeta, $btnNvmeRegFix, $btnInstalarHerramientas, $btnFirewallConfig, $btnProfiler, $btnDatabase, $btnSQLManager, $btnSQLManagement, $btnPrinterTool, $btnLectorDPicacls, $btnConfigurarIPs, $btnAddUser, $btnForzarActualizacion, $btnClearAnyDesk, $btnShowPrinters, $btnInstallPrinter, $btnClearPrintJobs, $btnAplicacionesNS, $btnCheckPermissions, $btnCambiarOTM, $btnCreateAPK, $btnExtractInstaller, $btnInstaladoresNS, $btnRegisterDlls, $btnMonitorServiciosLog, $btndzSQLite)
     foreach ($button in $buttonsToUpdate) {
         $button.Add_MouseLeave({ if ($script:setInstructionText) { $script:setInstructionText.Invoke($global:defaultInstructions) } })
     }
@@ -753,6 +755,11 @@ function New-MainForm {
             Write-Host "`n- - - Comenzando el proceso de 'Buscar Instaladores LZMA' - - -" -ForegroundColor Magenta
             Show-LZMADialog
         })
+    $btnNvmeRegFix.Add_Click({
+            Write-DzDebug ("`t[DEBUG] Click en 'Corrección NVMe 4KB (Regedit)' - {0}" -f (Get-Date -Format "HH:mm:ss")) -Color DarkYellow
+            Write-Host "`n- - - Comenzando el proceso de 'Corrección NVMe 4KB (Regedit)' - - -" -ForegroundColor Magenta
+            Show-NvmeRegFixDialog -Owner $window
+        })
     $btnConfigurarIPs.Add_Click({
             Write-DzDebug ("`t[DEBUG] Click en 'Configurar IPs' - {0}" -f (Get-Date -Format "HH:mm:ss")) -Color DarkYellow
             Write-Host "`n- - - Comenzando el proceso de 'Configurar IPs' - - -" -ForegroundColor Magenta
@@ -974,7 +981,6 @@ function Start-Application {
     Write-Host "  ✓ Entorno listo" -ForegroundColor Green
     Write-Host "`nCargando módulos..." -ForegroundColor Yellow
     $modulesPath = Join-Path $PSScriptRoot "modules"
-    $modules = @("GUI.psm1", "Database.psm1", "Utilities.psm1", "SqliteOps.psm1", "SqlTreeView.psm1", "Installers.psm1", "WindowsUtilities.psm1", "NationalUtilities.psm1", "SqlOps.psm1", "QueriesPad.psm1")
     foreach ($module in $modules) {
         $modulePath = Join-Path $modulesPath $module
         if (Test-Path $modulePath) {
