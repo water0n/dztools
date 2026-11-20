@@ -106,7 +106,7 @@ function Invoke-DzSqlCommandInternal {
         $command = $connection.CreateCommand()
         $command.CommandText = $Query
         $command.CommandTimeout = 0
-        $returnsResultSet = $Query -match "(?si)^\s*(SELECT|WITH)" -or $Query -match "(?si)\bOUTPUT\b"
+        $returnsResultSet = $Query -match "(?si)^\s*(SELECT|WITH)" -or $Query -match "(?si)\b(SELECT|OUTPUT)\b" -or $Query -match "(?si)^\s*(EXEC|EXECUTE)\b"
         if ($returnsResultSet) {
             $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($command)
             $dataTable = New-Object System.Data.DataTable
@@ -214,7 +214,7 @@ function Invoke-DzSqlBatchInternal {
             $command.CommandTimeout = 0
             $command.CommandText = $oneBatch
             Add-Debug ("Ejecutando batch #{0} (len={1})..." -f ($batchIndex + 1), $oneBatch.Length)
-            $isSelect = $oneBatch -match "(?si)^\s*(SELECT|WITH|EXEC|EXECUTE|DECLARE.*SELECT)" -or $oneBatch -match "(?si)\bOUTPUT\b"
+            $isSelect = $oneBatch -match "(?si)\b(SELECT|OUTPUT)\b" -or $oneBatch -match "(?si)^\s*(WITH|EXEC|EXECUTE)\b"
             try {
                 if ($isSelect) {
                     try {
@@ -232,6 +232,8 @@ function Invoke-DzSqlBatchInternal {
                                 $resultSets.Add([PSCustomObject]@{ DataTable = $t; RowCount = $t.Rows.Count })
                                 Add-Debug ("RS#{0} Filas={1} Cols={2}" -f $resultSets.Count, $t.Rows.Count, $t.Columns.Count)
                             }
+                        } elseif ($filledTables -gt 0) {
+                            $totalRowsAffected += $filledTables
                         }
                     } catch {
                         Add-Debug ("Adapter.Fill EX: {0}" -f $_.Exception.Message)
@@ -475,7 +477,7 @@ function Load-IniConnectionsToComboBox {
         Write-Host "`tNo se encontraron conexiones en archivos INI" -ForegroundColor Yellow
     }
     if ($connections.Count -gt 0) {
-        if ($connections -contains ".\\NationalSoft") {
+        if ($connections -contains ".\NationalSoft") {
             $Combo.Text = ".\NationalSoft"
         } else {
             $Combo.Text = [string]($connections | Select-Object -First 1)
@@ -527,7 +529,7 @@ function New-DzMarkdownTableText {
             }
             $cells += ConvertTo-DzMarkdownTableText -Value $value -NullText "NULL"
         }
-        $normalizedRows += ,$cells
+        $normalizedRows += , $cells
     }
     $widths = @()
     for ($i = 0; $i -lt $headerValues.Count; $i++) {
@@ -705,7 +707,7 @@ function Get-DzDataGridSelectionTable {
             foreach ($col in $visibleCols) {
                 $values += Get-DzDataGridCellValue -Row $row -Column $col
             }
-            $rows += ,$values
+            $rows += , $values
         }
         return [pscustomobject]@{
             Headers     = @($visibleCols | ForEach-Object { Get-DzDataGridColumnHeaderText -Column $_ })
@@ -745,7 +747,7 @@ function Get-DzDataGridSelectionTable {
                 $values += ""
             }
         }
-        $rows += ,$values
+        $rows += , $values
     }
     return [pscustomobject]@{
         Headers     = @($columns | ForEach-Object { Get-DzDataGridColumnHeaderText -Column $_ })
@@ -758,10 +760,12 @@ function Show-MultipleResultSets {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][System.Windows.Controls.TabControl]$TabControl,
-        [Parameter()][AllowEmptyCollection()][array]$ResultSets = @()
+        [Parameter()][AllowEmptyCollection()][array]$ResultSets = @(),
+        [Parameter()][bool]$Stacked = $false
     )
     Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] INICIO"
     Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] ResultSets Count: $($ResultSets.Count)"
+    Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Stacked: $Stacked"
     $messagesTab = $null
     $messagesTabIndex = -1
     for ($ti = 0; $ti -lt $TabControl.Items.Count; $ti++) {
@@ -933,27 +937,73 @@ function Show-MultipleResultSets {
     [void]$tNull.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.TextBlock]::BackgroundProperty, $nullBrush)))
     [void]$tNull.Setters.Add((New-Object System.Windows.Setter([System.Windows.Controls.TextBlock]::ForegroundProperty, $nullFg)))
     [void]$textStyleBase.Triggers.Add($tNull)
+    $useStackedLayout = $Stacked -and $ResultSets.Count -gt 1
+    $stackScrollViewer = $null
+    $stackGrid = $null
+    $stackRowIndex = 0
+    if ($useStackedLayout) {
+        $stackScrollViewer = New-Object System.Windows.Controls.ScrollViewer
+        $stackScrollViewer.VerticalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
+        $stackScrollViewer.HorizontalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Disabled
+        $stackScrollViewer.Focusable = $false
+
+        $stackGrid = New-Object System.Windows.Controls.Grid
+        $stackGrid.Margin = "4"
+    }
+    $totalRows = 0
     $i = 0
     foreach ($rs in $ResultSets) {
         $i++
-        $tab = New-Object System.Windows.Controls.TabItem
         $rowCount = if ($rs.RowCount -ne $null) { $rs.RowCount } else { $rs.DataTable.Rows.Count }
-        $headerPanel = New-Object System.Windows.Controls.StackPanel
-        $headerPanel.Orientation = "Horizontal"
-        $iconText = New-Object System.Windows.Controls.TextBlock
-        #dgResults construyendo la pestaña de resultados:
-        $iconText.Text = "📊"
-        $iconText.Margin = "0,0,6,0"
-        $iconText.FontSize = 10
-        $iconText.Margin = "0,0,4,0"
-        $titleText = New-Object System.Windows.Controls.TextBlock
-        $titleText.Text = "Resultado $i ($rowCount filas)"
-        $titleText.VerticalAlignment = "Center"
-        $titleText.FontSize = 10
-        $titleText.Margin = "0"
-        [void]$headerPanel.Children.Add($iconText)
-        [void]$headerPanel.Children.Add($titleText)
-        $tab.Header = $headerPanel
+        $totalRows += $rowCount
+        $tab = $null
+        $resultPanel = $null
+        if (-not $useStackedLayout) {
+            $tab = New-Object System.Windows.Controls.TabItem
+            $headerPanel = New-Object System.Windows.Controls.StackPanel
+            $headerPanel.Orientation = "Horizontal"
+            $iconText = New-Object System.Windows.Controls.TextBlock
+            #dgResults construyendo la pestaña de resultados:
+            $iconText.Text = "📊"
+            $iconText.Margin = "0,0,6,0"
+            $iconText.FontSize = 10
+            $iconText.Margin = "0,0,4,0"
+            $titleText = New-Object System.Windows.Controls.TextBlock
+            $titleText.Text = if ($ResultSets.Count -eq 1) { "Resultado ($rowCount filas)" } else { "Resultado $i ($rowCount filas)" }
+            $titleText.VerticalAlignment = "Center"
+            $titleText.FontSize = 10
+            $titleText.Margin = "0"
+            [void]$headerPanel.Children.Add($iconText)
+            [void]$headerPanel.Children.Add($titleText)
+            $tab.Header = $headerPanel
+        } else {
+            $resultPanelRow = New-Object System.Windows.Controls.RowDefinition
+            $initialHeight = if ($rowCount -eq 0) { 85 } elseif ($rowCount -le 3) { 110 } else { 180 }
+            $resultPanelRow.Height = [System.Windows.GridLength]::new($initialHeight, [System.Windows.GridUnitType]::Pixel)
+            $resultPanelRow.MinHeight = 65
+            [void]$stackGrid.RowDefinitions.Add($resultPanelRow)
+
+            $resultPanel = New-Object System.Windows.Controls.Grid
+            $resultPanel.Margin = if ($i -gt 1) { "0,4,0,0" } else { "0" }
+
+            $headerRow = New-Object System.Windows.Controls.RowDefinition
+            $headerRow.Height = "Auto"
+            [void]$resultPanel.RowDefinitions.Add($headerRow)
+
+            $gridRow = New-Object System.Windows.Controls.RowDefinition
+            $gridRow.Height = [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Star)
+            $gridRow.MinHeight = 45
+            [void]$resultPanel.RowDefinitions.Add($gridRow)
+
+            $headerLabel = New-Object System.Windows.Controls.TextBlock
+            $headerLabel.Text = "📊 Resultado $i ($rowCount filas)"
+            $headerLabel.FontWeight = "SemiBold"
+            $headerLabel.FontSize = 11
+            $headerLabel.Margin = "4,4,4,4"
+            $headerLabel.Foreground = $headerFg
+            [System.Windows.Controls.Grid]::SetRow($headerLabel, 0)
+            [void]$resultPanel.Children.Add($headerLabel)
+        }
         $dg = New-Object System.Windows.Controls.DataGrid
         $dg.AutoGenerateColumns = $true
         $dg.ItemsSource = $rs.DataTable.DefaultView
@@ -985,6 +1035,12 @@ function Show-MultipleResultSets {
         $dg.ColumnHeaderStyle = $hdrStyle
         $dg.RowHeaderStyle = $rowHdrStyle
         $dg.CellStyle = $cellStyle
+        $dg.Tag = [pscustomobject]@{
+            Type         = 'DzResultDataGrid'
+            ResultIndex  = $i
+            DisplayShort = if ($ResultSets.Count -eq 1) { "Resultado" } else { "Resultado $i" }
+            RowCount     = $rowCount
+        }
         $dg.Add_LoadingRow({
                 param($s, $e)
                 try {
@@ -1314,18 +1370,96 @@ function Show-MultipleResultSets {
                         }, [System.Windows.Threading.DispatcherPriority]::Loaded) | Out-Null
                 } catch { }
             })
-        $tab.Content = $dg
+        if ($useStackedLayout) {
+            $dg.MinHeight = 45
+            $dg.Margin = "4,0,4,4"
+
+            if ($stackScrollViewer) {
+                $dg.Add_PreviewMouseWheel({
+                    param($sender, $e)
+                    try {
+                        if ([System.Windows.Input.Keyboard]::Modifiers -band [System.Windows.Input.ModifierKeys]::Shift) { return }
+                        if ($stackScrollViewer -and -not $e.Handled) {
+                            if ($rowCount -le 6) {
+                                $eventArg = New-Object System.Windows.Input.MouseWheelEventArgs($e.MouseDevice, $e.Timestamp, $e.Delta)
+                                $eventArg.RoutedEvent = [System.Windows.UIElement]::MouseWheelEvent
+                                $eventArg.Source = $sender
+                                $stackScrollViewer.RaiseEvent($eventArg)
+                                $e.Handled = $true
+                            }
+                        }
+                    } catch {}
+                }.GetNewClosure())
+            }
+
+            [System.Windows.Controls.Grid]::SetRow($dg, 1)
+            [void]$resultPanel.Children.Add($dg)
+
+            [System.Windows.Controls.Grid]::SetRow($resultPanel, $stackRowIndex)
+            [void]$stackGrid.Children.Add($resultPanel)
+            $stackRowIndex++
+
+            if ($i -lt $ResultSets.Count) {
+                $splitterRow = New-Object System.Windows.Controls.RowDefinition
+                $splitterRow.Height = "6"
+                [void]$stackGrid.RowDefinitions.Add($splitterRow)
+
+                $splitter = New-Object System.Windows.Controls.GridSplitter
+                $splitter.Height = 6
+                $splitter.HorizontalAlignment = "Stretch"
+                $splitter.VerticalAlignment = "Center"
+                $splitter.ResizeDirection = "Rows"
+                $splitter.ResizeBehavior = "PreviousAndNext"
+                $splitter.ShowsPreview = $true
+                $splitter.Background = $gridLine
+                $splitter.ToolTip = "Arrastra para ajustar el alto de los resultados"
+                [System.Windows.Controls.Grid]::SetRow($splitter, $stackRowIndex)
+                [void]$stackGrid.Children.Add($splitter)
+                $stackRowIndex++
+            }
+            Write-Host "`tResultado $i apilado con $rowCount filas" -ForegroundColor Green
+        } else {
+            $tab.Content = $dg
+            if ($permanentTabIndex -ge 0) {
+                $TabControl.Items.Insert($i - 1, $tab)
+                Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña $i insertada en índice $($i-1) (antes de pestañas fijas)"
+            } else {
+                [void]$TabControl.Items.Add($tab)
+                Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña $i agregada (no hay pestañas fijas)"
+            }
+            Write-Host "`tPestaña $i creada con $rowCount filas" -ForegroundColor Green
+        }
+    }
+    if ($useStackedLayout) {
+        $tab = New-Object System.Windows.Controls.TabItem
+        $headerPanel = New-Object System.Windows.Controls.StackPanel
+        $headerPanel.Orientation = "Horizontal"
+        $iconText = New-Object System.Windows.Controls.TextBlock
+        $iconText.Text = "📊"
+        $iconText.Margin = "0,0,4,0"
+        $iconText.FontSize = 10
+        $titleText = New-Object System.Windows.Controls.TextBlock
+        $titleText.Text = "Resultados ($($ResultSets.Count) sets, $totalRows filas)"
+        $titleText.VerticalAlignment = "Center"
+        $titleText.FontSize = 10
+        $titleText.Margin = "0"
+        [void]$headerPanel.Children.Add($iconText)
+        [void]$headerPanel.Children.Add($titleText)
+        $tab.Header = $headerPanel
+        
+        $stackScrollViewer.Content = $stackGrid
+        $tab.Content = $stackScrollViewer
+
         if ($permanentTabIndex -ge 0) {
-            $TabControl.Items.Insert($i - 1, $tab)
-            Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña $i insertada en índice $($i-1) (antes de pestañas fijas)"
+            $TabControl.Items.Insert($permanentTabIndex, $tab)
+            Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña apilada insertada antes de pestañas fijas"
         } else {
             [void]$TabControl.Items.Add($tab)
-            Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña $i agregada (no hay pestañas fijas)"
+            Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Pestaña apilada agregada (no hay pestañas fijas)"
         }
-        Write-Host "`tPestaña $i creada con $rowCount filas" -ForegroundColor Green
+        Write-DzDebug "`t[DEBUG][Show-MultipleResultSets] Modo apilado: $($ResultSets.Count) grids en 1 pestaña"
     }
     if ($global:lblRowCount) {
-        $totalRows = ($ResultSets | Measure-Object -Property RowCount -Sum).Sum
         if ($ResultSets.Count -eq 1) {
             $global:lblRowCount.Text = "📊 $totalRows"
         } else {
@@ -1530,6 +1664,102 @@ BEGIN CATCH
     THROW;
 END CATCH;
 "@
+        "SR SYNC | nsplatformcontrol v2"                  = @"
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    -- 1. Definición del catálogo de entidades
+    IF OBJECT_ID('tempdb..#CatalogoEntidades') IS NOT NULL DROP TABLE #CatalogoEntidades;
+    CREATE TABLE #CatalogoEntidades (
+        EntityType TINYINT PRIMARY KEY,
+        Codigo VARCHAR(5),
+        Entidad VARCHAR(50),
+        Descripcion VARCHAR(100)
+    );
+
+    INSERT INTO #CatalogoEntidades (EntityType, Codigo, Entidad, Descripcion) VALUES
+    (1,  '01', 'Tax',                  'Catálogo de impuestos'),
+    (2,  '02', 'Group',                'Catálogo de grupos'),
+    (3,  '03', 'Subgroup',             'Catálogo de subgrupos'),
+    (4,  '04', 'ModifierGroup',        'Catálogo de grupos de modificadores'),
+    (5,  '05', 'Indication',           'Catálogo de comentarios de preparación'),
+    (6,  '06', 'PriceList',            'Catálogo de listas de precios'),
+    (7,  '07', 'MeasureUnit',          'Catálogo de unidades de medida'),
+    (8,  '08', 'Product',              'Catálogo de productos'),
+    (9,  '09', 'Modifier',             'Catálogo de modificadores'),
+    (10, '10', 'ProductModifierGroup', 'Productos con grupos de modificadores'),
+    (11, '11', 'SalesArea',            'Catálogo de áreas de venta'),
+    (12, '12', 'Device',               'Catálogo de dispositivos o estaciones'),
+    (13, '13', 'PaymentMethod',        'Catálogo de métodos de pago'),
+    (14, '14', 'User',                 'Catálogo de usuarios'),
+    (15, '15', 'Waiter',               'Catálogo de meseros'),
+    (16, '16', 'Shift',                'Catálogo de turnos'),
+    (17, '17', 'CustomerType',         'Catálogo de tipos de cliente'),
+    (18, '18', 'Table',                'Catálogo de mesas'),
+    (19, '19', 'Sale',                 'Catálogo de ventas'),
+    (20, '20', 'Invoice',              'Catálogo de facturas'),
+    (21, '21', 'OpenAccount',          'Resumen de cuentas abiertas'),
+    (22, '22', 'MaterialGroup',        'Catálogo de grupos de insumos'),
+    (23, '23', 'Material',             'Catálogo de insumos'),
+    (24, '24', 'Presentation',         'Catálogo de presentaciones'),
+    (25, '25', 'BillOfMaterials',      'Catálogo de recetas'),
+    (26, '26', 'Warehouse',            'Catálogo de almacenes'),
+    (27, '27', 'Inventory',            'Información de inventario'),
+    (28, '28', 'ProductEquivalence',   'Equivalencias de productos en unidades'),
+    (29, '29', 'SecurityEvents',       'Registro o catálogo de eventos de seguridad'),
+    (30, '30', 'CancellationInfo',     'Información o catálogo de cancelaciones');
+
+    -- 2. Conteo previo por cada EntityType presente en la tabla
+    IF OBJECT_ID('tempdb..#ConteoPrevio') IS NOT NULL DROP TABLE #ConteoPrevio;
+    SELECT
+        EntityType,
+        COUNT(*) AS Total
+    INTO #ConteoPrevio
+    FROM nsplatformcontrol
+    GROUP BY EntityType;
+
+    -- 3. Limpieza: Eliminar todo excepto Taxes (EntityType = 1)
+    DELETE FROM nsplatformcontrol
+    WHERE EntityType <> 1;
+
+    DECLARE @FilasEliminadas INT = @@ROWCOUNT;
+    DECLARE @TaxesConservados INT = (SELECT ISNULL(SUM(Total), 0) FROM #ConteoPrevio WHERE EntityType = 1);
+    DECLARE @TotalInicial INT = (SELECT ISNULL(SUM(Total), 0) FROM #ConteoPrevio);
+
+    COMMIT TRANSACTION;
+
+    -- RESULTADO 1: Resumen General
+    SELECT
+        @TotalInicial AS [Total Inicial],
+        @FilasEliminadas AS [Filas Eliminadas],
+        @TaxesConservados AS [Taxes Conservados],
+        'Limpieza completada exitosamente' AS [Estado];
+
+    -- RESULTADO 2: Inventario Detallado por Catálogo
+    SELECT
+        c.Codigo AS [Código],
+        c.Entidad AS [Entidad],
+        c.Descripcion AS [Descripción del Catálogo],
+        p.Total AS [Filas Afectadas],
+        CASE
+            WHEN c.EntityType = 1 THEN 'Conservado'
+            ELSE 'Eliminado'
+        END AS [Acción Realizada]
+    FROM #ConteoPrevio p
+    JOIN #CatalogoEntidades c ON p.EntityType = c.EntityType
+    ORDER BY c.EntityType;
+
+    -- Limpieza de tablas temporales
+    DROP TABLE #CatalogoEntidades;
+    DROP TABLE #ConteoPrevio;
+
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0
+        ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+"@
         "SR | Memoria Insuficiente"                       = @"
 UPDATE empresas
         SET nombre='', razonsocial='',direccion='',sucursal='',
@@ -1694,30 +1924,73 @@ function Get-ResultTabHeaderText {
     if ($null -ne $header) { return [string]$header }
     return "Resultado"
 }
+function Get-DzDataGridsFromElement {
+    param($Element)
+
+    $dataGrids = @()
+    if (-not $Element) { return $dataGrids }
+
+    if ($Element -is [System.Windows.Controls.DataGrid]) {
+        return @($Element)
+    }
+
+    if ($Element -is [System.Windows.Controls.ScrollViewer]) {
+        return @(Get-DzDataGridsFromElement -Element $Element.Content)
+    }
+
+    if ($Element -is [System.Windows.Controls.Panel]) {
+        foreach ($child in $Element.Children) {
+            $dataGrids += @(Get-DzDataGridsFromElement -Element $child)
+        }
+        return $dataGrids
+    }
+
+    if ($Element -is [System.Windows.Controls.ContentControl] -and $Element.Content) {
+        return @(Get-DzDataGridsFromElement -Element $Element.Content)
+    }
+
+    return $dataGrids
+}
 function Get-ExportableResultTabs {
     param([System.Windows.Controls.TabControl]$TabControl)
     $exportable = @()
     if (-not $TabControl) { return $exportable }
     foreach ($item in $TabControl.Items) {
         if ($item -isnot [System.Windows.Controls.TabItem]) { continue }
-        $dg = $item.Content
-        if ($dg -isnot [System.Windows.Controls.DataGrid]) { continue }
-        $dt = $null
-        if ($dg.ItemsSource -is [System.Data.DataView]) {
-            $dt = $dg.ItemsSource.Table
-        } elseif ($dg.ItemsSource -is [System.Data.DataTable]) {
-            $dt = $dg.ItemsSource
-        } else {
-            try { $dt = $dg.ItemsSource.Table } catch { $dt = $null }
-        }
-        if (-not $dt -or -not $dt.Rows -or $dt.Rows.Count -lt 1) { continue }
         $headerText = Get-ResultTabHeaderText -TabItem $item
-        $exportable += [pscustomobject]@{
-            Tab          = $item
-            DataTable    = $dt
-            RowCount     = $dt.Rows.Count
-            Display      = "$headerText ($($dt.Rows.Count) filas)"
-            DisplayShort = $headerText
+        $dataGrids = @(Get-DzDataGridsFromElement -Element $item.Content)
+
+        $gridIndex = 0
+        foreach ($dg in $dataGrids) {
+            $gridIndex++
+            $dt = $null
+            if ($dg.ItemsSource -is [System.Data.DataView]) {
+                $dt = $dg.ItemsSource.Table
+            } elseif ($dg.ItemsSource -is [System.Data.DataTable]) {
+                $dt = $dg.ItemsSource
+            } else {
+                try { $dt = $dg.ItemsSource.Table } catch { $dt = $null }
+            }
+            if (-not $dt -or -not $dt.Rows -or $dt.Rows.Count -lt 1) { continue }
+
+            $displayShort = $headerText
+            try {
+                if ($dg.Tag -and $dg.Tag.DisplayShort) {
+                    $displayShort = [string]$dg.Tag.DisplayShort
+                } elseif ($dataGrids.Count -gt 1) {
+                    $displayShort = "$headerText - Resultado $gridIndex"
+                }
+            } catch {
+                $displayShort = $headerText
+            }
+
+            $exportable += [pscustomobject]@{
+                Tab          = $item
+                DataTable    = $dt
+                RowCount     = $dt.Rows.Count
+                Display      = "$displayShort ($($dt.Rows.Count) filas)"
+                DisplayShort = $displayShort
+            }
         }
     }
     return $exportable
@@ -1809,6 +2082,7 @@ function Disconnect-DbCore {
     Write-DzDebug "`t[DEBUG][Disconnect] Deshabilitando controles de operaciones..."
     if ($Ctx.btnDisconnectDb) { $Ctx.btnDisconnectDb.IsEnabled = $false }
     if ($Ctx.btnExecute) { $Ctx.btnExecute.IsEnabled = $false }
+    if ($Ctx.btnOpenFile) { $Ctx.btnOpenFile.IsEnabled = $false }
     if ($Ctx.btnClearQuery) { $Ctx.btnClearQuery.IsEnabled = $false }
     if ($Ctx.btnExport) { $Ctx.btnExport.IsEnabled = $false }
     if ($Ctx.btnHistorial) { $Ctx.btnHistorial.IsEnabled = $false }
@@ -1897,6 +2171,7 @@ function Connect-DbCore {
 
     if ($Ctx.btnDisconnectDb) { $Ctx.btnDisconnectDb.IsEnabled = $true }
     if ($Ctx.btnExecute) { $Ctx.btnExecute.IsEnabled = $true }
+    if ($Ctx.btnOpenFile) { $Ctx.btnOpenFile.IsEnabled = $true }
     if ($Ctx.btnClearQuery) { $Ctx.btnClearQuery.IsEnabled = $true }
     if ($Ctx.cmbQueries) { $Ctx.cmbQueries.IsEnabled = $true }
     if ($Ctx.btnExport) { $Ctx.btnExport.IsEnabled = $true }
@@ -2063,8 +2338,31 @@ function Export-ResultsCore {
         return
     }
 
+    $safeNameForExport = {
+        param([string]$Name)
+        $safe = ($Name -replace '[\\/:*?"<>|]', '-')
+        $safe = $safe.Trim()
+        if ([string]::IsNullOrWhiteSpace($safe)) { return "resultado" }
+        return $safe
+    }
+    $exportTargetToFile = {
+        param($Target, [string]$Path, [bool]$UseDelimited, [string]$Separator)
+        if ($UseDelimited) {
+            Export-ResultSetToDelimitedText -ResultSet $Target.DataTable -Path $Path -Separator $Separator
+        } else {
+            Export-ResultSetToCsv -ResultSet ([pscustomobject]@{ DataTable = $Target.DataTable }) -Path $Path
+        }
+    }
+
     $target = $null
+    $exportAll = $false
     if ($resultTabs.Count -gt 1) {
+        $totalRows = ($resultTabs | Measure-Object -Property RowCount -Sum).Sum
+        $allItem = [pscustomobject]@{
+            Path         = "__ALL_RESULTS__"
+            Display      = "Todos los resultados ($($resultTabs.Count) resultsets, $totalRows filas)"
+            DisplayShort = "Todos los resultados"
+        }
         $items = $resultTabs | ForEach-Object {
             [pscustomobject]@{
                 Path         = $_
@@ -2072,18 +2370,60 @@ function Export-ResultsCore {
                 DisplayShort = $_.DisplayShort
             }
         }
-        $selected = Show-WpfPathSelectionDialog -Title "Exportar resultados" -Prompt "Seleccione la pestaña de resultados a exportar:" -Items $items -ExecuteButtonText "Exportar"
+        $items = @($allItem) + @($items)
+        $selected = Show-WpfPathSelectionDialog -Title "Exportar resultados" -Prompt "Seleccione el resultado a exportar:" -Items $items -ExecuteButtonText "Exportar"
         if (-not $selected) { return }
-        $target = $selected.Path
+        if ([string]$selected.Path -eq "__ALL_RESULTS__") {
+            $exportAll = $true
+        } else {
+            $target = $selected.Path
+        }
     } else {
         $target = $resultTabs[0]
+    }
+
+    if ($exportAll) {
+        $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+        $saveDialog = New-Object Microsoft.Win32.SaveFileDialog
+        $saveDialog.Title = "Exportar todos los resultados"
+        $saveDialog.Filter = "CSV (*.csv)|*.csv|Texto delimitado (*.txt)|*.txt"
+        $saveDialog.FileName = "${timestamp}_resultados.csv"
+        $saveDialog.InitialDirectory = [Environment]::GetFolderPath('Desktop')
+        if ($saveDialog.ShowDialog() -ne $true) { return }
+
+        $basePath = $saveDialog.FileName
+        $baseDirectory = [System.IO.Path]::GetDirectoryName($basePath)
+        $baseName = [System.IO.Path]::GetFileNameWithoutExtension($basePath)
+        if ([string]::IsNullOrWhiteSpace($baseName)) { $baseName = "${timestamp}_resultados" }
+
+        $extension = [System.IO.Path]::GetExtension($basePath).ToLowerInvariant()
+        $useDelimited = ($extension -eq ".txt" -or $saveDialog.FilterIndex -eq 2)
+        $outputExtension = if ($useDelimited) { ".txt" } else { ".csv" }
+        $separator = "|"
+        if ($useDelimited) {
+            $separator = New-WpfInputDialog -Title "Separador de exportación" -Prompt "Ingrese el separador para los archivos de texto:" -DefaultValue "|"
+            if ($null -eq $separator) { return }
+        }
+
+        $createdFiles = @()
+        $index = 0
+        foreach ($resultTab in $resultTabs) {
+            $index++
+            $safeName = & $safeNameForExport ([string]$resultTab.DisplayShort)
+            $fileName = "{0}_{1:00}_{2}{3}" -f $baseName, $index, $safeName, $outputExtension
+            $filePath = Join-Path $baseDirectory $fileName
+            & $exportTargetToFile $resultTab $filePath $useDelimited $separator
+            $createdFiles += $filePath
+        }
+
+        Ui-Info "Exportación completada.`nArchivos: $($createdFiles.Count)`nCarpeta:`n$baseDirectory" "Exportación" $Ctx.MainWindow
+        return
     }
 
     $rowCount = [int]$target.RowCount
     $headerText = [string]$target.DisplayShort
 
-    $safeName = ($headerText -replace '[\\/:*?"<>|]', '-')
-    if ([string]::IsNullOrWhiteSpace($safeName)) { $safeName = "resultado" }
+    $safeName = & $safeNameForExport $headerText
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 
     $saveDialog = New-Object Microsoft.Win32.SaveFileDialog
@@ -2098,9 +2438,9 @@ function Export-ResultsCore {
     if ($extension -eq ".txt" -or $saveDialog.FilterIndex -eq 2) {
         $separator = New-WpfInputDialog -Title "Separador de exportación" -Prompt "Ingrese el separador para el archivo de texto:" -DefaultValue "|"
         if ($null -eq $separator) { return }
-        Export-ResultSetToDelimitedText -ResultSet $target.DataTable -Path $filePath -Separator $separator
+        & $exportTargetToFile $target $filePath $true $separator
     } else {
-        Export-ResultSetToCsv -ResultSet ([pscustomobject]@{ DataTable = $target.DataTable }) -Path $filePath
+        & $exportTargetToFile $target $filePath $false "|"
     }
 
     Ui-Info "Exportación completada en:`n$filePath" "Exportación" $Ctx.MainWindow
@@ -2156,6 +2496,7 @@ function Get-DbUiContext {
 
         btnDisconnectDb        = $global:btnDisconnectDb
         btnExecute             = $global:btnExecute
+        btnOpenFile            = $global:btnOpenFile
         btnClearQuery          = $global:btnClearQuery
         btnExport              = $global:btnExport
         btnHistorial           = $global:btnHistorial
@@ -2177,8 +2518,12 @@ function Disconnect-DbUiSafe {
 
     try {
         $ctx = Get-DbUiContext
+        $prevServer = [string]$ctx.Server
         Disconnect-DbCore -Ctx $ctx
         Save-DbUiContext -Ctx $ctx
+        if (-not [string]::IsNullOrWhiteSpace($prevServer) -and (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue)) {
+            Write-DzAuditEvent -EventType 'SQL_DISCONNECT' -Target $prevServer -Status 'OK'
+        }
         Write-Host "✓ Desconectado exitosamente" -ForegroundColor Green
     } catch {
         Write-DzDebug "`t[DEBUG][Disconnect] ERROR: $($_.Exception.Message)"
@@ -2191,6 +2536,7 @@ function Connect-DbUiSafe {
     [CmdletBinding()]
     param()
 
+    $ctx = $null
     try {
         $ctx = Get-DbUiContext
         Connect-DbCore -Ctx $ctx
@@ -2198,11 +2544,21 @@ function Connect-DbUiSafe {
         if (Get-Command Save-DzSqlConnection -ErrorAction SilentlyContinue) {
             Save-DzSqlConnection -Server $ctx.Server -User $ctx.User -Password $ctx.Password
         }
+        if (Get-Command Update-DzSqlConnectionUsage -ErrorAction SilentlyContinue) {
+            Update-DzSqlConnectionUsage -Server $ctx.Server -Database $ctx.Database
+        }
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+            Write-DzAuditEvent -EventType 'SQL_CONNECT' -Target $ctx.Server -Status 'OK' -Details @{ user = $ctx.User; database = $ctx.Database }
+        }
         Write-Host "✓ Conectado exitosamente a: $($ctx.Server)" -ForegroundColor Green
     } catch {
         Write-DzDebug "`t[DEBUG][Connect] CATCH: $($_.Exception.Message)"
         Write-DzDebug "`t[DEBUG][Connect] Tipo: $($_.Exception.GetType().FullName)"
         Write-DzDebug "`t[DEBUG][Connect] Stack: $($_.ScriptStackTrace)"
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+            $targetSrv = if ($ctx -and $ctx.txtServer) { ([string]$ctx.txtServer.Text).Trim() } else { "" }
+            Write-DzAuditEvent -EventType 'SQL_CONNECT' -Target $targetSrv -Status 'ERROR' -Details @{ error = $_.Exception.Message }
+        }
         Ui-Error "Error de conexión: $($_.Exception.Message)" $global:MainWindow
         Write-Host "Error | Error de conexión: $($_.Exception.Message)" -ForegroundColor Red
     }
@@ -2211,6 +2567,6 @@ Export-ModuleMember -Function @(
     'Invoke-SqlQuery', 'Invoke-SqlQueryMultiResultSet', 'Remove-SqlComments', 'Get-SqlDatabases', 'Get-SqlDatabasesInfo', 'Connect-DbUiSafe', 'Disconnect-DbUiSafe', 'get-DbUiContext',
     'Execute-SqlQuery', 'Get-IniConnections', 'Load-IniConnectionsToComboBox',
     'Show-MultipleResultSets', 'Export-ResultSetToCsv', 'Export-ResultSetToDelimitedText',
-    'Get-PredefinedQueries', 'Remove-SqlComments', 'Get-TextPointerFromOffset', 'Get-ResultTabHeaderText',
+    'Get-PredefinedQueries', 'Get-TextPointerFromOffset', 'Get-ResultTabHeaderText',
     'Get-ExportableResultTabs', 'Disconnect-DbCore', 'Connect-DbCore', 'Export-ResultsCore', 'Get-DbNameFromComboSelection'
 )

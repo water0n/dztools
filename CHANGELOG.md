@@ -9,6 +9,15 @@ y este proyecto adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 ## [Unreleased]
 
 ### Added
+- Nuevo módulo `DzStorage.psm1` con motor SQLite unificado en `C:\Temp\dztools\dztools.db` (reemplaza `dztools.ini` y `Queries.ini`)
+- Descarga y verificación SHA256 de `sqlite3.dll` en `C:\Temp\dztools\runtime\` (migrando automáticamente copias previas desde `release\resources\`)
+- Cifrado de contraseñas SQL con Windows DPAPI (`CurrentUser` + entropía por servidor) y bandera `needs_reentry`
+- Historial de queries sin límite de 100 registros con paginación keyset, búsqueda FTS5 trigrama / `LIKE`, filtros, duración (`duration_ms`), favoritos y limpieza de duplicados
+- Persistencia completa de pestañas abiertas (`file_path`, `database_name`, `is_active`) con autoguardado periódico
+- Bitácora `audit_log` con captura global WPF filtrada (sin ruido) y eventos enriquecidos en operaciones sensibles, más cola `audit-pending.jsonl` en modo fallback
+- Pestaña **Bitacora** (visible solo con modo **DEBUG** activado, después de *SSMS portable*) para consulta de `audit_log` con filtros por columnas, facetas, rango de fechas y paginación *keyset* (solo lectura)
+- Migración automática atómica con `.migrated.bak` redactado, recuperación automática ante corrupción y respaldos rotativos con `VACUUM INTO`
+- Suite de pruebas de integración `tests/DzStorage.Tests.ps1`
 - Estructura modular del proyecto
 - Módulo GUI para creación de formularios
 - Módulo Database para operaciones SQL
@@ -18,9 +27,12 @@ y este proyecto adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 ### Changed
 - Reorganización del código en módulos
 - Mejor manejo de dependencias
+- `SqliteOps.psm1` usa `C:\Temp\dztools\runtime\` para el DLL nativo evitando pérdida al actualizar con `dztools.ps1`
+- `QueriesPad.psm1` rediseñado para paginación, búsqueda y favoritos sobre SQLite
 
 ### Fixed
 - Problemas de compatibilidad con PS5.0
+- Correcciones de typos y exportaciones duplicadas (`.\NationalSoft`, `$global:lblExecutionTimer`, carga única de módulos en `src\main.ps1`, exports duplicados)
 
 ## [0.1.0] - 2024-01-15
 ### Added

@@ -998,9 +998,15 @@ function Show-InstallPrinterDialog {
         }
         try {
           Add-Printer -Name $name -DriverName $driverName -PortName $portName -ErrorAction Stop | Out-Null
+          if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+            Write-DzAuditEvent -EventType 'PRINTER_INSTALL' -Target $name -Status 'OK' -Details @{ ip = $ip; port = $portName; driver = $driverName }
+          }
           Show-WpfMessageBox -Message "Impresora instalada correctamente.`nPuerto: $portName" -Title "Éxito" -Buttons OK -Icon Information | Out-Null
           $w.Close()
         } catch {
+          if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+            Write-DzAuditEvent -EventType 'PRINTER_INSTALL' -Target $name -Status 'ERROR' -Details @{ ip = $ip; error = $_.Exception.Message }
+          }
           Show-WpfMessageBox -Message "No se pudo instalar la impresora:`n$($_.Exception.Message)" -Title "Error" -Buttons OK -Icon Error | Out-Null
         }
       })
@@ -1048,10 +1054,16 @@ function Invoke-ClearPrintJobs {
     Write-Host "`tIniciando servicio Spooler..." -ForegroundColor DarkYellow
     Start-Service -Name Spooler -ErrorAction Stop
     if ($InfoTextBlock) { $InfoTextBlock.Text = "Listo: cola de impresión reiniciada." }
+    if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+      Write-DzAuditEvent -EventType 'PRINTER_CLEAR_JOBS' -Target 'Spooler' -Status 'OK'
+    }
     Show-WpfMessageBox -Message "Los trabajos de impresión han sido eliminados y el servicio de cola de impresión se reinició correctamente." -Title "Operación exitosa" -Buttons "OK" -Icon "Information" | Out-Null
     return $true
   } catch {
     $err = $_.Exception.Message
+    if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+      Write-DzAuditEvent -EventType 'PRINTER_CLEAR_JOBS' -Target 'Spooler' -Status 'ERROR' -Details @{ error = $err }
+    }
     Write-Host "`n[ERROR Invoke-ClearPrintJobs] $err" -ForegroundColor Red
     if ($InfoTextBlock) { $InfoTextBlock.Text = "Error: $err" }
     Show-WpfMessageBox -Message "Ocurrió un error al intentar limpiar impresoras o reiniciar el servicio:`n$err" -Title "Error" -Buttons "OK" -Icon "Error" | Out-Null
@@ -1869,10 +1881,16 @@ function Show-AddUserDialog {
         New-LocalUser -Name $username -Password $securePassword -AccountNeverExpires -PasswordNeverExpires | Out-Null
         Add-LocalGroupMember -Group $group -Member $username
         Write-DzDebug "`t[DEBUG][Show-AddUserDialog] Usuario creado: $username Grupo: $group"
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+          Write-DzAuditEvent -EventType 'WIN_USER_CREATE' -Target $username -Status 'OK' -Details @{ group = $group; is_admin = $isAdmin }
+        }
         Show-WpfMessageBox -Message "Usuario '$username' creado y agregado al grupo '$group'." -Title "Éxito" -Buttons OK -Icon Information | Out-Null
         $w.DialogResult = $true; $w.Close()
       } catch {
         Write-DzDebug "`t[DEBUG][Show-AddUserDialog] ERROR creando usuario: $($_.Exception.Message)" Red
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+          Write-DzAuditEvent -EventType 'WIN_USER_CREATE' -Target $username -Status 'ERROR' -Details @{ group = $group; is_admin = $isAdmin; error = $_.Exception.Message }
+        }
         & $SetStatus "Error: $($_.Exception.Message)" "Error"
         Show-WpfMessageBox -Message "Error al crear usuario:`n$($_.Exception.Message)" -Title "Error" -Buttons OK -Icon Error | Out-Null
       }
@@ -2271,9 +2289,15 @@ function Show-IPConfigDialog {
 
       try {
         Convert-DhcpToStatic -Alias $alias | Out-Null
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+          Write-DzAuditEvent -EventType 'WIN_IP_CONFIG' -Target $alias -Status 'OK' -Details @{ action = 'convert_static'; ip = $snap.IPAddress }
+        }
         Show-WpfMessageBox -Message "Listo. Se convirtió a IP fija usando $($snap.IPAddress)." -Title "Éxito" -Buttons OK -Icon Information | Out-Null
         $c['lblIps'].Text = (Get-AdapterIpsText -Alias $alias)
       } catch {
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+          Write-DzAuditEvent -EventType 'WIN_IP_CONFIG' -Target $alias -Status 'ERROR' -Details @{ action = 'convert_static'; error = $_.Exception.Message }
+        }
         Show-WpfMessageBox -Message "Error al convertir a IP fija:`n$($_.Exception.Message)" -Title "Error" -Buttons OK -Icon Error | Out-Null
       }
     })
@@ -2304,9 +2328,15 @@ function Show-IPConfigDialog {
 
       try {
         New-NetIPAddress -InterfaceAlias $alias -IPAddress $newIp -PrefixLength $snap.PrefixLength -ErrorAction Stop | Out-Null
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+          Write-DzAuditEvent -EventType 'WIN_IP_CONFIG' -Target $alias -Status 'OK' -Details @{ action = 'assign_ip'; ip = $newIp; prefix = $snap.PrefixLength }
+        }
         Show-WpfMessageBox -Message "Se agregó la IP adicional $newIp al adaptador $alias." -Title "Éxito" -Buttons OK -Icon Information | Out-Null
         $c['lblIps'].Text = (Get-AdapterIpsText -Alias $alias)
       } catch {
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+          Write-DzAuditEvent -EventType 'WIN_IP_CONFIG' -Target $alias -Status 'ERROR' -Details @{ action = 'assign_ip'; ip = $newIp; error = $_.Exception.Message }
+        }
         Show-WpfMessageBox -Message "Error al agregar IP:`n$($_.Exception.Message)" -Title "Error" -Buttons OK -Icon Error | Out-Null
       }
     })
@@ -2338,9 +2368,15 @@ function Show-IPConfigDialog {
 
         ipconfig /renew $alias | Out-Null
 
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+          Write-DzAuditEvent -EventType 'WIN_IP_CONFIG' -Target $alias -Status 'OK' -Details @{ action = 'enable_dhcp' }
+        }
         Show-WpfMessageBox -Message "Se cambió a DHCP y se limpió la puerta de enlace/rutas del adaptador $alias." -Title "Éxito" -Buttons OK -Icon Information | Out-Null
         $c['lblIps'].Text = "Generando IP por DHCP. Seleccione de nuevo."
       } catch {
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+          Write-DzAuditEvent -EventType 'WIN_IP_CONFIG' -Target $alias -Status 'ERROR' -Details @{ action = 'enable_dhcp'; error = $_.Exception.Message }
+        }
         Show-WpfMessageBox -Message "Error al cambiar a DHCP:`n$($_.Exception.Message)" -Title "Error" -Buttons OK -Icon Error | Out-Null
       }
 
@@ -2353,374 +2389,6 @@ function Show-IPConfigDialog {
     })
 
   $window.ShowDialog() | Out-Null
-}
-function Show-LZMADialog {
-  param([array]$Instaladores)
-  Write-DzDebug "`t[DEBUG][Show-LZMADialog] INICIO"
-  $theme = Get-DzUiTheme
-  $UiConfirm = { param([string]$m, [string]$t = "Confirmar")(Show-WpfMessageBoxSafe -Message $m -Title $t -Buttons "YesNo" -Icon "Question" -Owner $w) -eq [System.Windows.MessageBoxResult]::Yes }.GetNewClosure()
-  function Convert-RegProviderPathToDisplay {
-    param([Parameter(Mandatory)][string]$ProviderPath)
-    $p = $ProviderPath -replace '^Microsoft\.PowerShell\.Core\\Registry::', ''
-    if ($p -like 'HKEY_LOCAL_MACHINE\*') { return ('HKLM:\' + $p.Substring('HKEY_LOCAL_MACHINE\'.Length)) }
-    if ($p -like 'HKEY_CURRENT_USER\*') { return ('HKCU:\' + $p.Substring('HKEY_CURRENT_USER\'.Length)) }
-    return $p
-  }
-  function Get-LzmaInstallerItems {
-    $LZMAregistryPath = "HKLM:\SOFTWARE\WOW6432Node\Caphyon\Advanced Installer\LZMA"
-    if (-not (Test-Path $LZMAregistryPath)) { return @() }
-    $carpetasPrincipales = Get-ChildItem -Path $LZMAregistryPath -ErrorAction SilentlyContinue | Where-Object { $_.PSIsContainer }
-    $tmp = @()
-    foreach ($carpeta in $carpetasPrincipales) {
-      $subdirs = Get-ChildItem -Path $carpeta.PSPath -ErrorAction SilentlyContinue | Where-Object { $_.PSIsContainer }
-      foreach ($sd in $subdirs) {
-        $tmp += [PSCustomObject]@{Name = [string]$sd.PSChildName; ProviderPath = [string]$sd.PSPath; DisplayPath = (Convert-RegProviderPathToDisplay -ProviderPath ([string]$sd.PSPath)) }
-      }
-    }
-    $tmp | Sort-Object Name -Descending
-  }
-  if (-not $Instaladores -or $Instaladores.Count -eq 0) {
-    $LZMAregistryPath = "HKLM:\SOFTWARE\WOW6432Node\Caphyon\Advanced Installer\LZMA"
-    if (-not (Test-Path $LZMAregistryPath)) {
-      Write-DzDebug "`t[DEBUG][Show-LZMADialog] No existe la clave LZMA: $LZMAregistryPath" Yellow
-      Show-WpfMessageBox -Message "No se encontró Advanced Installer (LZMA) en este equipo.`n`nRuta no existe:`n$LZMAregistryPath" -Title "Sin instaladores" -Buttons OK -Icon Information | Out-Null
-      Write-DzDebug "`t[DEBUG][Show-LZMADialog] Fin - sin clave LZMA"
-      return
-    }
-    try {
-      $carpetasPrincipales = Get-ChildItem -Path $LZMAregistryPath -ErrorAction Stop | Where-Object { $_.PSIsContainer }
-      if (-not $carpetasPrincipales -or $carpetasPrincipales.Count -lt 1) {
-        Write-DzDebug "`t[DEBUG][Show-LZMADialog] No se encontraron carpetas principales." Yellow
-        Show-WpfMessageBox -Message "No se encontraron carpetas principales en la ruta del registro." -Title "Sin resultados" -Buttons OK -Icon Information | Out-Null
-        return
-      }
-      $tmp = @()
-      foreach ($carpeta in $carpetasPrincipales) {
-        $subdirs = Get-ChildItem -Path $carpeta.PSPath -ErrorAction SilentlyContinue | Where-Object { $_.PSIsContainer }
-        foreach ($sd in $subdirs) { $tmp += [PSCustomObject]@{Name = $sd.PSChildName; Path = $sd.PSPath } }
-      }
-      if (-not $tmp -or $tmp.Count -lt 1) {
-        Write-DzDebug "`t[DEBUG][Show-LZMADialog] No se encontraron subcarpetas." Yellow
-        Show-WpfMessageBox -Message "No se encontraron instaladores (subcarpetas) en la ruta del registro." -Title "Sin resultados" -Buttons OK -Icon Information | Out-Null
-        return
-      }
-      $Instaladores = $tmp | Sort-Object Name -Descending
-    } catch {
-      Write-DzDebug "`t[DEBUG][Show-LZMADialog] Error accediendo al registro: $($_.Exception.Message)" Red
-      Show-WpfMessageBox -Message "Error accediendo al registro:`n$($_.Exception.Message)" -Title "Error" -Buttons OK -Icon Error | Out-Null
-      return
-    }
-  }
-  $items = foreach ($i in $Instaladores) {
-    if (-not $i) { continue }
-    $provider = if ($null -ne $i.PSObject.Properties['ProviderPath']) { [string]$i.ProviderPath } else { [string]$i.Path }
-    $displayPath = if ($null -ne $i.PSObject.Properties['DisplayPath'] -and -not [string]::IsNullOrWhiteSpace([string]$i.DisplayPath)) { [string]$i.DisplayPath } else { Convert-RegProviderPathToDisplay -ProviderPath $provider }
-    [PSCustomObject]@{Name = [string]$i.Name; ProviderPath = $provider; DisplayPath = $displayPath; Display = ("{0}  |  {1}" -f [string]$i.Name, $displayPath) }
-  }
-  $stringXaml = @"
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Carpetas LZMA"
-        Width="760" Height="290"
-        MinWidth="760" MinHeight="290"
-        MaxWidth="760" MaxHeight="290"
-        WindowStartupLocation="Manual"
-        WindowStyle="None"
-        ResizeMode="NoResize"
-        ShowInTaskbar="False"
-        Background="Transparent"
-        AllowsTransparency="True"
-        Topmost="False"
-        FontFamily="{DynamicResource UiFontFamily}"
-        FontSize="{DynamicResource UiFontSize}">
-  <Window.Resources>
-    <Style TargetType="{x:Type Control}">
-      <Setter Property="FontFamily" Value="{DynamicResource UiFontFamily}"/>
-      <Setter Property="FontSize" Value="11"/>
-    </Style>
-    <Style x:Key="IconButtonStyle" TargetType="Button">
-      <Setter Property="Width" Value="30"/>
-      <Setter Property="Height" Value="26"/>
-      <Setter Property="Padding" Value="0"/>
-      <Setter Property="Background" Value="Transparent"/>
-      <Setter Property="Foreground" Value="{DynamicResource FormFg}"/>
-      <Setter Property="BorderThickness" Value="0"/>
-      <Setter Property="Cursor" Value="Hand"/>
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="Button">
-            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6">
-              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-            </Border>
-            <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentRed}"/>
-                <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
-              </Trigger>
-              <Trigger Property="IsPressed" Value="True">
-                <Setter TargetName="Bd" Property="Opacity" Value="0.9"/>
-              </Trigger>
-              <Trigger Property="IsEnabled" Value="False">
-                <Setter TargetName="Bd" Property="Opacity" Value="0.55"/>
-              </Trigger>
-            </ControlTemplate.Triggers>
-          </ControlTemplate>
-        </Setter.Value>
-      </Setter>
-    </Style>
-    <Style x:Key="PrimaryButtonStyle" TargetType="Button">
-      <Setter Property="Height" Value="32"/>
-      <Setter Property="MinWidth" Value="110"/>
-      <Setter Property="Padding" Value="12,6"/>
-      <Setter Property="Background" Value="{DynamicResource AccentPrimary}"/>
-      <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
-      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrushColor}"/>
-      <Setter Property="BorderThickness" Value="1"/>
-      <Setter Property="Cursor" Value="Hand"/>
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="Button">
-            <Border x:Name="Bd"
-                    Background="{TemplateBinding Background}"
-                    BorderBrush="{TemplateBinding BorderBrush}"
-                    BorderThickness="{TemplateBinding BorderThickness}"
-                    CornerRadius="8">
-              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-            </Border>
-            <ControlTemplate.Triggers>
-              <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Bd" Property="Opacity" Value="0.92"/>
-              </Trigger>
-              <Trigger Property="IsPressed" Value="True">
-                <Setter TargetName="Bd" Property="Opacity" Value="0.85"/>
-              </Trigger>
-              <Trigger Property="IsEnabled" Value="False">
-                <Setter TargetName="Bd" Property="Opacity" Value="0.55"/>
-              </Trigger>
-            </ControlTemplate.Triggers>
-          </ControlTemplate>
-        </Setter.Value>
-      </Setter>
-    </Style>
-    <Style x:Key="SecondaryButtonStyle" TargetType="Button" BasedOn="{StaticResource PrimaryButtonStyle}">
-      <Setter Property="Background" Value="{DynamicResource ControlBg}"/>
-      <Setter Property="Foreground" Value="{DynamicResource ControlFg}"/>
-    </Style>
-    <Style x:Key="ComboStyle" TargetType="ComboBox">
-      <Setter Property="Background" Value="{DynamicResource ControlBg}"/>
-      <Setter Property="Foreground" Value="{DynamicResource ControlFg}"/>
-      <Setter Property="BorderBrush" Value="{DynamicResource BorderBrushColor}"/>
-      <Setter Property="BorderThickness" Value="1"/>
-      <Setter Property="Padding" Value="10,4"/>
-      <Setter Property="Height" Value="30"/>
-    </Style>
-    <Style TargetType="ComboBoxItem">
-      <Setter Property="Background" Value="Transparent"/>
-      <Setter Property="Foreground" Value="{DynamicResource ControlFg}"/>
-      <Setter Property="Padding" Value="10,6"/>
-      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-      <Style.Triggers>
-        <Trigger Property="IsHighlighted" Value="True">
-          <Setter Property="Background" Value="{DynamicResource PanelBg}"/>
-        </Trigger>
-        <Trigger Property="IsSelected" Value="True">
-          <Setter Property="Background" Value="{DynamicResource AccentPrimary}"/>
-          <Setter Property="Foreground" Value="{DynamicResource OnAccentFg}"/>
-        </Trigger>
-        <Trigger Property="IsEnabled" Value="False">
-          <Setter Property="Opacity" Value="0.55"/>
-        </Trigger>
-      </Style.Triggers>
-    </Style>
-  </Window.Resources>
-
-  <Border Background="{DynamicResource FormBg}"
-          BorderBrush="{DynamicResource BorderBrushColor}"
-          BorderThickness="1"
-          CornerRadius="12"
-          Margin="10"
-          SnapsToDevicePixels="True">
-    <Border.Effect>
-      <DropShadowEffect Color="Black" Direction="270" ShadowDepth="4" BlurRadius="14" Opacity="0.25"/>
-    </Border.Effect>
-
-    <Grid>
-      <Grid.RowDefinitions>
-        <RowDefinition Height="52"/>
-        <RowDefinition Height="Auto"/>
-        <RowDefinition Height="*"/>
-        <RowDefinition Height="Auto"/>
-      </Grid.RowDefinitions>
-
-      <Border Grid.Row="0"
-              Name="HeaderBar"
-              Background="{DynamicResource FormBg}"
-              CornerRadius="12,12,0,0"
-              Padding="12,8">
-        <Grid>
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="Auto"/>
-            <ColumnDefinition Width="*"/>
-            <ColumnDefinition Width="Auto"/>
-          </Grid.ColumnDefinitions>
-
-          <Border Grid.Column="0"
-                  Width="6"
-                  CornerRadius="3"
-                  Background="{DynamicResource AccentPrimary}"
-                  Margin="0,4,10,4"/>
-
-          <StackPanel Grid.Column="1" Orientation="Vertical">
-            <TextBlock Text="Carpetas LZMA"
-                       FontWeight="SemiBold"
-                       Foreground="{DynamicResource FormFg}"
-                       FontSize="12"/>
-            <TextBlock Text="Seleccione el instalador (registro) que desea renombrar."
-                       Foreground="{DynamicResource AccentMuted}"
-                       FontSize="10"
-                       Margin="0,2,0,0"/>
-          </StackPanel>
-
-          <Button Grid.Column="2"
-                  Name="btnClose"
-                  Style="{StaticResource IconButtonStyle}"
-                  Content="✕"
-                  ToolTip="Cerrar"/>
-        </Grid>
-      </Border>
-
-      <Border Grid.Row="1"
-              Background="{DynamicResource PanelBg}"
-              BorderBrush="{DynamicResource BorderBrushColor}"
-              BorderThickness="1"
-              CornerRadius="10"
-              Padding="10,8"
-              Margin="12,0,12,10">
-        <TextBlock Text="Tip: si algo falla, puedes renombrar el registro para forzar que el instalador se regenere."
-                   Foreground="{DynamicResource PanelFg}"
-                   FontSize="10"
-                   Opacity="0.9"/>
-      </Border>
-
-      <Grid Grid.Row="2" Margin="12,0,12,10">
-        <Grid.RowDefinitions>
-          <RowDefinition Height="Auto"/>
-          <RowDefinition Height="*"/>
-        </Grid.RowDefinitions>
-
-        <ComboBox Name="cmbInstallers"
-                  Grid.Row="0"
-                  Style="{StaticResource ComboStyle}"
-                  Margin="0,0,0,10"
-                  DisplayMemberPath="Display"
-                  SelectedValuePath="ProviderPath"/>
-
-        <Border Grid.Row="1"
-                Background="{DynamicResource ControlBg}"
-                BorderBrush="{DynamicResource BorderBrushColor}"
-                BorderThickness="1"
-                CornerRadius="10"
-                Padding="10">
-          <StackPanel>
-            <TextBlock Text="AI_ExePath:" Foreground="{DynamicResource FormFg}" Margin="0,0,0,4"/>
-            <TextBlock Name="lblExePath"
-                       Text="-"
-                       Foreground="{DynamicResource AccentMuted}"
-                       TextWrapping="Wrap"
-                       TextTrimming="None"/>
-          </StackPanel>
-        </Border>
-      </Grid>
-
-      <StackPanel Grid.Row="3"
-                  Orientation="Horizontal"
-                  HorizontalAlignment="Right"
-                  Margin="12,0,12,12">
-        <Button Name="btnRename" Content="Renombrar" Style="{StaticResource PrimaryButtonStyle}" Margin="0,0,10,0" IsEnabled="False"/>
-        <Button Name="btnExit" Content="Salir" Style="{StaticResource SecondaryButtonStyle}" IsCancel="True"/>
-      </StackPanel>
-    </Grid>
-  </Border>
-</Window>
-"@
-  try { $ui = New-WpfWindow -Xaml $stringXaml -PassThru } catch { Write-DzDebug "`t[DEBUG][Show-LZMADialog] ERROR creando ventana: $($_.Exception.Message)" Red; Show-WpfMessageBox -Message "No se pudo crear la ventana LZMA." -Title "Error" -Buttons OK -Icon Error | Out-Null; return }
-  $w = $ui.Window
-  $c = $ui.Controls
-  Set-DzWpfThemeResources -Window $w -Theme $theme
-  try { Set-WpfDialogOwner -Dialog $w } catch {}
-  try { if (-not $w.Owner -and $global:MainWindow -is [System.Windows.Window]) { $w.Owner = $global:MainWindow } } catch {}
-  $w.WindowStartupLocation = "Manual"
-  $w.Add_Loaded({
-      try {
-        $owner = $w.Owner
-        if (-not $owner) { $w.WindowStartupLocation = "CenterScreen"; return }
-        $ob = $owner.RestoreBounds
-        $targetW = $w.ActualWidth
-        $targetH = $w.ActualHeight
-        if ($targetW -le 0) { $targetW = $w.Width }
-        if ($targetH -le 0) { $targetH = $w.Height }
-        $left = $ob.Left + (($ob.Width - $targetW) / 2)
-        $top = $ob.Top + (($ob.Height - $targetH) / 2)
-        $hOwner = [System.Windows.Interop.WindowInteropHelper]::new($owner).Handle
-        $screen = [System.Windows.Forms.Screen]::FromHandle($hOwner)
-        $wa = $screen.WorkingArea
-        if ($left -lt $wa.Left) { $left = $wa.Left }
-        if ($top -lt $wa.Top) { $top = $wa.Top }
-        if (($left + $targetW) -gt $wa.Right) { $left = $wa.Right - $targetW }
-        if (($top + $targetH) -gt $wa.Bottom) { $top = $wa.Bottom - $targetH }
-        $w.Left = [double]$left
-        $w.Top = [double]$top
-      } catch {}
-    }.GetNewClosure())
-  $script:__dlgResult = $false
-  $script:__allowClose = $false
-  $w.Add_Closing({ param($sender, $e)if (-not $script:__allowClose) { $e.Cancel = $true } })
-  $c['btnClose'].Add_Click({ $script:__dlgResult = $false; $script:__allowClose = $true; $w.Close() })
-  $c['HeaderBar'].Add_MouseLeftButtonDown({ if ($_.ChangedButton -eq [System.Windows.Input.MouseButton]::Left) { $w.DragMove() } })
-  $placeholder = [PSCustomObject]@{Name = ""; ProviderPath = ""; Display = "Selecciona instalador a renombrar" }
-  $c['cmbInstallers'].ItemsSource = @($placeholder) + @($items)
-  $c['cmbInstallers'].SelectedIndex = 0
-  $updateUi = {
-    $idx = $c['cmbInstallers'].SelectedIndex
-    $c['btnRename'].IsEnabled = ($idx -gt 0)
-    if ($idx -le 0) { $c['lblExePath'].Text = "-"; return }
-    $it = $c['cmbInstallers'].SelectedItem
-    if (-not $it -or [string]::IsNullOrWhiteSpace($it.ProviderPath)) { $c['lblExePath'].Text = "No encontrado"; return }
-    try {
-      $prop = Get-ItemProperty -Path $it.ProviderPath -Name "AI_ExePath" -ErrorAction SilentlyContinue
-      if ($prop -and $prop.AI_ExePath) { $c['lblExePath'].Text = [string]$prop.AI_ExePath } else { $c['lblExePath'].Text = "No encontrado" }
-    } catch { $c['lblExePath'].Text = "Error leyendo AI_ExePath" }
-  }
-  $c['cmbInstallers'].Add_SelectionChanged({ & $updateUi })
-  & $updateUi
-  $c['btnRename'].Add_Click({
-      $idx = $c['cmbInstallers'].SelectedIndex
-      if ($idx -le 0) { return }
-      $it = $c['cmbInstallers'].SelectedItem
-      if (-not $it -or [string]::IsNullOrWhiteSpace($it.ProviderPath)) { return }
-      $rutaVieja = [string]$it.ProviderPath
-      $nombreViejo = [string]$it.Name
-      $nuevoNombre = "$nombreViejo.backup"
-      $msg = "¿Está seguro de renombrar el registro?`n`n$rutaVieja`n`nA:`n$nuevoNombre"
-      $ok = & $UiConfirm $msg "Confirmar renombrado"
-      if (-not $ok) { return }
-      try {
-        Rename-Item -Path $rutaVieja -NewName $nuevoNombre -ErrorAction Stop
-        Show-WpfMessageBox -Message "Registro renombrado correctamente." -Title "Éxito" -Buttons OK -Icon Information -Owner $w | Out-Null
-        $fresh = Get-LzmaInstallerItems
-        $freshItems = foreach ($i in $fresh) { [PSCustomObject]@{Name = [string]$i.Name; ProviderPath = [string]$i.ProviderPath; DisplayPath = [string]$i.DisplayPath; Display = ("{0}  |  {1}" -f [string]$i.Name, [string]$i.DisplayPath) } }
-        $placeholder2 = [PSCustomObject]@{Name = ""; ProviderPath = ""; Display = "Selecciona instalador a renombrar" }
-        $c['cmbInstallers'].ItemsSource = @($placeholder2) + @($freshItems)
-        $c['cmbInstallers'].SelectedIndex = 0
-        & $updateUi
-      } catch {
-        Show-WpfMessageBox -Message "Error al renombrar:`n$($_.Exception.Message)" -Title "Error" -Buttons OK -Icon Error -Owner $w | Out-Null
-      }
-    })
-  $c['btnExit'].Add_Click({ $script:__dlgResult = $false; $script:__allowClose = $true; $w.Close() })
-  $null = $w.ShowDialog()
-  Write-DzDebug "`t[DEBUG][Show-LZMADialog] FIN"
-  return $script:__dlgResult
 }
 function Show-FirewallConfigDialog {
   Write-DzDebug "`t[DEBUG][Show-FirewallConfigDialog] INICIO"
@@ -3376,8 +3044,14 @@ function Show-FirewallConfigDialog {
           }
         }
         if ($errors.Count -gt 0) {
+          if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+            Write-DzAuditEvent -EventType 'WIN_FIREWALL_RULE' -Target "$ruleName ($port)" -Status 'ERROR' -Details @{ port = $port; errors = $errors }
+          }
           & $SetStatus "Errores al crear reglas: $($errors -join '; ')" "Error"
         } elseif ($created -gt 0) {
+          if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+            Write-DzAuditEvent -EventType 'WIN_FIREWALL_RULE' -Target ($createdRules -join ', ') -Status 'OK' -Details @{ port = $port; directions = $directions; created = $created }
+          }
           & $SetStatus "Se agregaron $created regla(s) para el puerto $port." "Ok"
           $dirText = ($directions | ForEach-Object { if ($_ -eq "Inbound") { "Entrada" } else { "Salida" } }) -join " y "
           $msg = "Regla(s) agregada(s) exitosamente:`n`nNombre: $($createdRules -join ', ')`nPuerto: $port`nDirección: $dirText"
@@ -3401,5 +3075,5 @@ function Show-FirewallConfigDialog {
   Write-DzDebug "`t[DEBUG][Show-FirewallConfigDialog] FIN"
 }
 Export-ModuleMember -Function @('Show-SystemComponents', 'Start-SystemUpdate', 'show-NSPrinters', 'Invoke-ClearPrintJobs',
-  'Show-AddUserDialog', 'Show-IPConfigDialog', 'Show-LZMADialog', 'Show-FirewallConfigDialog',
+  'Show-AddUserDialog', 'Show-IPConfigDialog', 'Show-FirewallConfigDialog',
   'Show-InstallPrinterDialog')

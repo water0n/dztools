@@ -28,7 +28,7 @@ function Write-Log {
 }
 Write-Host "`nImportando módulos..." -ForegroundColor Yellow
 $modulesPath = Join-Path $PSScriptRoot "modules"
-$modules = @("GUI.psm1", "Database.psm1", "Utilities.psm1", "SqliteOps.psm1", "CloudBackup.psm1", "SqlTreeView.psm1", "Installers.psm1", "WindowsUtilities.psm1", "NationalUtilities.psm1", "SqlOps.psm1", "QueriesPad.psm1", "AISqlContext.psm1", "AI.psm1")
+$modules = @("GUI.psm1", "Database.psm1", "Utilities.psm1", "SqliteOps.psm1", "DzStorage.psm1", "CloudBackup.psm1", "SqlTreeView.psm1", "Installers.psm1", "WindowsUtilities.psm1", "NationalUtilities.psm1", "SqlOps.psm1", "QueriesPad.psm1", "AISqlContext.psm1", "AI.psm1", "RegistryUtilities.psm1")
 foreach ($module in $modules) {
     $modulePath = Join-Path $modulesPath $module
     if (Test-Path $modulePath) {
@@ -47,14 +47,16 @@ foreach ($module in $modules) {
 }
 $global:defaultInstructions = @"
 ----- CAMBIOS -----
+- Persistencia unificada en SQLite (dztools.db): configuración, credenciales SQL cifradas (DPAPI), historial ilimitado con búsqueda FTS5/filtros/favoritos, pestañas con archivo/BD/autoguardado y bitácora de auditoría
+- Se agregó herramienta de diagnóstico y corrección NVMe 4KB (Regedit) para SQL Server
 - Se agregó botón para SQLite Browser (dzSQLite)
     * Se agregó opción para incluir el respaldo de la base de datos en el mismo archivo comprimido.
 - Subida a CloudFare Buckets
-- AI SQL Context para generar consultas con IA (beta)
 - Nuevo botón para Innstaladores NS
 - Monitor de servicios y logs
 - Historial de queries
 - SSMS Portable
+    * (nuevo) Se agregó opción para abrir SSMS Portable desde la pestaña de queries.
     * Copiar ahora permite tipo markdown.
     * TreeView nuevo!
     * Crear y eliminar bases de datos
@@ -68,6 +70,8 @@ $global:defaultInstructions = @"
     * Mejoras en seguridad y manejo de errores
     * Carga de INIS en la conexión a BDD.
     * Multiples Queries (MultiQuery)
+    * AI SQL Context para generar consultas con IA (beta)
+        - Nuevo modelo Gemini 3.7
 - Instalador de impresoras Generic Text por IP
 - Registro y deregistro de Dlls
 - Configuraciones de Firewall
@@ -126,6 +130,30 @@ function Initialize-Environment {
     } catch {
         Write-Host "Advertencia: No se pudo inicializar el sistema de queries. $_" -ForegroundColor Yellow
     }
+    $storageMode = "fallback"
+    if (Get-Command Get-DzStorageMode -ErrorAction SilentlyContinue) {
+        $storageMode = Get-DzStorageMode
+    }
+    if ($storageMode -eq 'sqlite') {
+        Write-Host "  ✓ Almacenamiento SQLite activo (dztools.db)" -ForegroundColor Green
+    } else {
+        $reason = if (Get-Command Get-DzStorageLastError -ErrorAction SilentlyContinue) { Get-DzStorageLastError } else { "" }
+        Write-Host "  ⚠ SQLite no disponible; operando en modo fallback INI. $reason" -ForegroundColor Yellow
+        $global:defaultInstructions = "⚠ MODO FALLBACK INI (SQLite no disponible: $reason)`r`n`r`n" + $global:defaultInstructions
+    }
+    if (Get-Command Initialize-DzAudit -ErrorAction SilentlyContinue) {
+        try {
+            Initialize-DzAudit
+            Write-DzAuditEvent -EventType 'APP_START' -Target $env:COMPUTERNAME -Status 'INFO' -Details @{
+                version      = $global:version
+                ps_version   = $PSVersionTable.PSVersion.ToString()
+                is_64bit     = [Environment]::Is64BitProcess
+                storage_mode = $storageMode
+            }
+        } catch {
+            Write-Host "Advertencia: No se pudo inicializar la bitácora de auditoría. $_" -ForegroundColor Yellow
+        }
+    }
     return $true
 }
 $global:isHighlightingQuery = $false
@@ -147,6 +175,7 @@ function New-MainForm {
     $btnPrinterTool = $window.FindName("btnPrinterTool")
     $btnLectorDPicacls = $window.FindName("btnLectorDPicacls")
     $LZMAbtnBuscarCarpeta = $window.FindName("LZMAbtnBuscarCarpeta")
+    $btnNvmeRegFix = $window.FindName("btnNvmeRegFix")
     $btnConfigurarIPs = $window.FindName("btnConfigurarIPs")
     $btnAddUser = $window.FindName("btnAddUser")
     $btnFirewallConfig = $window.FindName("btnFirewallConfig")
@@ -173,6 +202,7 @@ function New-MainForm {
     $btnSsmsPanelToggle = $window.FindName("btnSsmsPanelToggle")
     $lblConnectionStatus = $window.FindName("lblConnectionStatus")
     $btnExecute = $window.FindName("btnExecute")
+    $btnOpenFile = $window.FindName("btnOpenFile")
     $btnClearQuery = $window.FindName("btnClearQuery")
     $btnExport = $window.FindName("btnExport")
     $btnHistorial = $window.FindName("btnHistorial")
@@ -184,6 +214,9 @@ function New-MainForm {
     $panelSsmsContent = $window.FindName("panelSsmsContent")
     $tglDarkMode = $window.FindName("tglDarkMode")
     $tglDebugMode = $window.FindName("tglDebugMode")
+    $chkStackedResults = $window.FindName("chkStackedResults")
+    $tabControlMain = $window.FindName("tabControl")
+    $tabBitacora = $window.FindName("tabBitacora")
     $script:predefinedQueries = Get-PredefinedQueries
     #Sirveaun?
     $script:sqlKeywords = 'ADD|ALL|ALTER|AND|ANY|AS|ASC|AUTHORIZATION|BACKUP|BETWEEN|BIGINT|BINARY|BIT|BY|CASE|CHECK|COLUMN|CONSTRAINT|CREATE|CROSS|CURRENT_DATE|CURRENT_TIME|CURRENT_TIMESTAMP|DATABASE|DEFAULT|DELETE|DESC|DISTINCT|DROP|EXEC|EXECUTE|EXISTS|FOREIGN|FROM|FULL|FUNCTION|GROUP|HAVING|IN|INDEX|INNER|INSERT|INT|INTO|IS|JOIN|KEY|LEFT|LIKE|LIMIT|NOT|NULL|ON|OR|ORDER|OUTER|PRIMARY|PROCEDURE|REFERENCES|RETURN|RIGHT|ROWNUM|SELECT|SET|SMALLINT|TABLE|TOP|TRUNCATE|UNION|UNIQUE|UPDATE|VALUES|VIEW|WHERE|WITH|RESTORE'
@@ -239,6 +272,9 @@ function New-MainForm {
                     $_.Tag -and
                     $_.Tag.Type -eq 'QueryTab'
                 })
+            if ($existingQueryTabs.Count -eq 0) {
+                New-QueryTab -TabControl $tcQueries | Out-Null
+            }
         }
     } catch {
         Write-Host "  Advertencia: No se pudieron restaurar las pestañas: $_" -ForegroundColor Yellow
@@ -249,6 +285,13 @@ function New-MainForm {
             })
         if ($existingQueryTabs.Count -eq 0) {
             New-QueryTab -TabControl $tcQueries | Out-Null
+        }
+    }
+    if (Get-Command Start-DzOpenTabsAutosaveTimer -ErrorAction SilentlyContinue) {
+        try {
+            Start-DzOpenTabsAutosaveTimer -TabControl $tcQueries -SaveHandler ${function:Save-OpenQueryTabs}
+        } catch {
+            Write-DzDebug "`t[DEBUG] No se pudo iniciar autoguardado de pestañas: $_" -Color Yellow
         }
     }
     if ($btnExecute -and -not $btnExecute.IsEnabled) {
@@ -271,9 +314,9 @@ function New-MainForm {
     function Stop-ExecutionTimer {
         $script:execStopwatch.Stop()
         if ($script:execUiTimer.IsEnabled) { $script:execUiTimer.Stop() }
-        if ($global:lblExecutionTime) {
+        if ($global:lblExecutionTimer) {
             $t = $script:execStopwatch.Elapsed
-            $global:lblExecutionTime.Text = ("Tiempo: {0:mm\:ss\.fff}" -f $t)
+            $global:lblExecutionTimer.Text = ("Tiempo: {0:mm\:ss\.fff}" -f $t)
         }
     }
     $global:txtServer = $txtServer
@@ -283,6 +326,8 @@ function New-MainForm {
     $global:btnConnectDb = $btnConnectDb
     $global:btnDisconnectDb = $btnDisconnectDb
     $global:btnExecute = $btnExecute
+    $global:btnOpenFile = $btnOpenFile
+    $global:chkStackedResults = $chkStackedResults
     $global:btnClearQuery = $btnClearQuery
     $global:btnExport = $btnExport
     $global:btnHistorial = $btnHistorial
@@ -359,8 +404,16 @@ function New-MainForm {
     $txt_InfoInstrucciones.Text = $global:defaultInstructions
     $script:initializingToggles = $true
     if ($tglDarkMode) { $tglDarkMode.IsChecked = ((Get-DzUiMode) -eq 'dark') }
-    if ($tglDebugMode) { $tglDebugMode.IsChecked = (Get-DzDebugPreference) }
+    $initialDebug = Get-DzDebugPreference
+    if ($tglDebugMode) { $tglDebugMode.IsChecked = $initialDebug }
+    if ($tabBitacora) {
+        $tabBitacora.Visibility = if ($initialDebug) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
+    }
+    if ($chkStackedResults) { $chkStackedResults.IsChecked = (Get-DzStackedResults) }
     $script:initializingToggles = $false
+    if (Get-Command Initialize-DzBitacoraTab -ErrorAction SilentlyContinue) {
+        Initialize-DzBitacoraTab -Window $window
+    }
     $script:setInstructionText = {
         param([string]$Message)
         if ($null -ne $txt_InfoInstrucciones) {
@@ -369,7 +422,7 @@ function New-MainForm {
     }.GetNewClosure()
     $script:showRestartNotice = {
         param([string]$settingLabel)
-        Show-WpfMessageBoxSafe -Message "Se guardó $settingLabel en dztools.ini.`nReinicia la aplicación para aplicar los cambios." -Title "Reinicio requerido" -Buttons "OK" -Icon "Information" -Owner $window | Out-Null
+        Show-WpfMessageBoxSafe -Message "Se guardó $settingLabel en la configuración.`nReinicia la aplicación para aplicar los cambios." -Title "Reinicio requerido" -Buttons "OK" -Icon "Information" -Owner $window | Out-Null
     }.GetNewClosure()
     if ($tglDarkMode) {
         $tglDarkMode.Add_Checked({
@@ -389,13 +442,32 @@ function New-MainForm {
         $tglDebugMode.Add_Checked({
                 if ($script:initializingToggles) { return }
                 Set-DzDebugPreference -Enabled $true
+                if ($tabBitacora) { $tabBitacora.Visibility = [System.Windows.Visibility]::Visible }
                 Write-Host "[DEBUG] Activado" -ForegroundColor Yellow
             })
         $tglDebugMode.Add_Unchecked({
                 Write-DzDebug "`t[DEBUG]Toggle DEBUG desactivado"
                 if ($script:initializingToggles) { return }
                 Set-DzDebugPreference -Enabled $false
+                if ($tabBitacora) {
+                    if ($tabControlMain -and $tabControlMain.SelectedItem -eq $tabBitacora) {
+                        $tabControlMain.SelectedIndex = 0
+                    }
+                    $tabBitacora.Visibility = [System.Windows.Visibility]::Collapsed
+                }
                 Write-Host "[DEBUG] Desactivado" -ForegroundColor DarkGray
+            })
+    }
+    if ($chkStackedResults) {
+        $chkStackedResults.Add_Checked({
+                if ($script:initializingToggles) { return }
+                Set-DzStackedResults -Enabled $true
+                Write-DzDebug "`t[DEBUG] Resultados apilados: habilitado"
+            })
+        $chkStackedResults.Add_Unchecked({
+                if ($script:initializingToggles) { return }
+                Set-DzStackedResults -Enabled $false
+                Write-DzDebug "`t[DEBUG] Resultados apilados: deshabilitado"
             })
     }
     $global:txt_AdapterStatus = $txt_AdapterStatus
@@ -420,7 +492,7 @@ function New-MainForm {
             Write-DzDebug "`t[DEBUG] Error aplicando credenciales iniciales: $_" -Color Yellow
         }
     }
-    $buttonsToUpdate = @($LZMAbtnBuscarCarpeta, $btnInstalarHerramientas, $btnFirewallConfig, $btnProfiler, $btnDatabase, $btnSQLManager, $btnSQLManagement, $btnPrinterTool, $btnLectorDPicacls, $btnConfigurarIPs, $btnAddUser, $btnForzarActualizacion, $btnClearAnyDesk, $btnShowPrinters, $btnInstallPrinter, $btnClearPrintJobs, $btnAplicacionesNS, $btnCheckPermissions, $btnCambiarOTM, $btnCreateAPK, $btnExtractInstaller, $btnInstaladoresNS, $btnRegisterDlls, $btnMonitorServiciosLog, $btndzSQLite)
+    $buttonsToUpdate = @($LZMAbtnBuscarCarpeta, $btnNvmeRegFix, $btnInstalarHerramientas, $btnFirewallConfig, $btnProfiler, $btnDatabase, $btnSQLManager, $btnSQLManagement, $btnPrinterTool, $btnLectorDPicacls, $btnConfigurarIPs, $btnAddUser, $btnForzarActualizacion, $btnClearAnyDesk, $btnShowPrinters, $btnInstallPrinter, $btnClearPrintJobs, $btnAplicacionesNS, $btnCheckPermissions, $btnCambiarOTM, $btnCreateAPK, $btnExtractInstaller, $btnInstaladoresNS, $btnRegisterDlls, $btnMonitorServiciosLog, $btndzSQLite)
     foreach ($button in $buttonsToUpdate) {
         $button.Add_MouseLeave({ if ($script:setInstructionText) { $script:setInstructionText.Invoke($global:defaultInstructions) } })
     }
@@ -660,8 +732,17 @@ function New-MainForm {
                         }
                     } catch { Write-Host "`nError al eliminar el archivo." -ForegroundColor Red }
                 }
+                if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                    $stAny = if ($errors.Count -eq 0) { 'OK' } else { 'ERROR' }
+                    Write-DzAuditEvent -EventType 'ANYDESK_CLEAR' -Target 'AnyDesk' -Status $stAny -Details @{ deleted_files = $deletedFilesCount; errors = $errors }
+                }
                 if ($errors.Count -eq 0) { Ui-Info "$deletedFilesCount archivo(s) eliminado(s) correctamente." "Éxito" $global:MainWindow } else { Ui-Error "Se encontraron errores. Revisa la consola para más detalles." $global:MainWindow }
-            } else { Write-Host "`tEl usuario canceló la operación." -ForegroundColor Red }
+            } else {
+                if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                    Write-DzAuditEvent -EventType 'ANYDESK_CLEAR' -Target 'AnyDesk' -Status 'CANCELLED'
+                }
+                Write-Host "`tEl usuario canceló la operación." -ForegroundColor Red
+            }
         })
     $btnShowPrinters.Add_Click({
             Write-DzDebug ("`t[DEBUG] Click en 'Show Printers' - {0}" -f (Get-Date -Format "HH:mm:ss")) -Color DarkYellow
@@ -734,6 +815,11 @@ function New-MainForm {
             Write-Host "`n- - - Comenzando el proceso de 'Buscar Instaladores LZMA' - - -" -ForegroundColor Magenta
             Show-LZMADialog
         })
+    $btnNvmeRegFix.Add_Click({
+            Write-DzDebug ("`t[DEBUG] Click en 'Corrección NVMe 4KB (Regedit)' - {0}" -f (Get-Date -Format "HH:mm:ss")) -Color DarkYellow
+            Write-Host "`n- - - Comenzando el proceso de 'Corrección NVMe 4KB (Regedit)' - - -" -ForegroundColor Magenta
+            Show-NvmeRegFixDialog -Owner $window
+        })
     $btnConfigurarIPs.Add_Click({
             Write-DzDebug ("`t[DEBUG] Click en 'Configurar IPs' - {0}" -f (Get-Date -Format "HH:mm:ss")) -Color DarkYellow
             Write-Host "`n- - - Comenzando el proceso de 'Configurar IPs' - - -" -ForegroundColor Magenta
@@ -802,6 +888,28 @@ function New-MainForm {
             Write-Host "`n`t- - - Ejecutando consulta - - -" -ForegroundColor Gray
             Execute-QueryUiSafe
         })
+    if ($btnOpenFile) {
+        $btnOpenFile.Add_Click({
+                Write-DzDebug ("`t[DEBUG] Click en 'Abrir Archivo' - {0}" -f (Get-Date -Format "HH:mm:ss")) -Color DarkYellow
+                try {
+                    $openDialog = New-Object Microsoft.Win32.OpenFileDialog
+                    $openDialog.Title = "Abrir archivo SQL o texto"
+                    $openDialog.Filter = "Scripts SQL (*.sql)|*.sql|Archivos de texto (*.txt;*.log;*.csv;*.json;*.xml)|*.txt;*.log;*.csv;*.json;*.xml|Todos los archivos (*.*)|*.*"
+                    $openDialog.FilterIndex = 1
+                    $openDialog.Multiselect = $false
+                    if ($openDialog.ShowDialog() -eq $true) {
+                        $selectedPath = $openDialog.FileName
+                        if (-not [string]::IsNullOrWhiteSpace($selectedPath) -and (Test-Path -LiteralPath $selectedPath)) {
+                            Write-Host "`n- - - Abriendo archivo: $selectedPath - - -" -ForegroundColor Cyan
+                            Open-SqlFileInTab -TabControl $global:tcQueries -FilePath $selectedPath | Out-Null
+                        }
+                    }
+                } catch {
+                    Write-Host "`n[ERROR Abrir Archivo] $($_.Exception.Message)" -ForegroundColor Red
+                    Ui-Error "Error al abrir el archivo:`n$($_.Exception.Message)" "Error" $window
+                }
+            })
+    }
     $cmbDatabases.Add_SelectionChanged({
             if ($global:cmbDatabases.SelectedItem) {
                 $dbName = Get-DbNameFromComboSelection -ComboBox $global:cmbDatabases
@@ -894,6 +1002,9 @@ function New-MainForm {
                 Write-Host "PSScriptStackTrace:" -ForegroundColor Magenta
                 Write-Host $er.ScriptStackTrace -ForegroundColor Magenta
             }
+            if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                Write-DzAuditEvent -EventType 'APP_ERROR' -Target 'WPF.Dispatcher' -Status 'ERROR' -Details @{ message = $ex.Message; type = $ex.GetType().FullName }
+            }
             $e.Handled = $true
         })
     $window.Add_Closing({
@@ -917,6 +1028,12 @@ function New-MainForm {
                     Write-Host "  ✓ Conexión cerrada" -ForegroundColor Green
                 }
             } catch {}
+            if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                Write-DzAuditEvent -EventType 'APP_EXIT' -Target $env:COMPUTERNAME -Status 'INFO' -Details @{ version = $global:version }
+            }
+            if (Get-Command Close-DzStorage -ErrorAction SilentlyContinue) {
+                Close-DzStorage
+            }
             Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
             Write-Host "  ¡Hasta pronto!" -ForegroundColor Green
             Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`n" -ForegroundColor Cyan
@@ -931,16 +1048,6 @@ function Start-Application {
         return
     }
     Write-Host "  ✓ Entorno listo" -ForegroundColor Green
-    Write-Host "`nCargando módulos..." -ForegroundColor Yellow
-    $modulesPath = Join-Path $PSScriptRoot "modules"
-    $modules = @("GUI.psm1", "Database.psm1", "Utilities.psm1", "SqliteOps.psm1", "SqlTreeView.psm1", "Installers.psm1", "WindowsUtilities.psm1", "NationalUtilities.psm1", "SqlOps.psm1", "QueriesPad.psm1")
-    foreach ($module in $modules) {
-        $modulePath = Join-Path $modulesPath $module
-        if (Test-Path $modulePath) {
-            Import-Module $modulePath -Force -DisableNameChecking -ErrorAction Stop
-        }
-    }
-    Write-Host "  ✓ Módulos cargados" -ForegroundColor Green
     Write-Host "`nCreando interfaz gráfica..." -ForegroundColor Yellow
     $mainForm = New-MainForm
     Write-Host "  ✓ Interfaz lista`n" -ForegroundColor Green
@@ -951,7 +1058,7 @@ function Start-Application {
     Write-Host "`nTodos los derechos reservados para Gerardo Zermeño Tools." -ForegroundColor Cyan
     Write-Host "Para reportar errores o sugerencias, contacte vía Teams." -ForegroundColor Cyan
     Write-Host "O crea un issue en GitHub en:" -ForegroundColor Cyan
-    Write-Host "https://github.com/water0ff/dztools/issues/new" -ForegroundColor Cyan
+    Write-Host "https://github.com/water0n/dztools/issues/new" -ForegroundColor Cyan
     $null = $mainForm.ShowDialog()
 }
 try {

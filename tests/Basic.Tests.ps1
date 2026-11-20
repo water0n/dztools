@@ -38,19 +38,37 @@ Describe "Pruebas básicas del proyecto" {
     Context "Módulos cargados en main.ps1" {
         It "Debe listar todos los módulos presentes en src/modules" {
             $mainContent = Get-Content $script:MainPath -Raw
-            $moduleMatch = [regex]::Match($mainContent, '\$modules\s*=\s*@\((?<content>[\s\S]*?)\)', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-            $moduleMatch.Success | Should -BeTrue
-
-            $declaredModules = [regex]::Matches($moduleMatch.Groups['content'].Value, '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value }
-            $declaredModules = $declaredModules | Where-Object { $_ -ne "" }
+            $moduleMatches = [regex]::Matches($mainContent, '\$modules\s*=\s*@\((?<content>[\s\S]*?)\)', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+            $moduleMatches.Count | Should -BeGreaterThan 0
 
             $moduleFiles = Get-ChildItem -Path $script:ModulesPath -Filter "*.psm1" | Select-Object -ExpandProperty Name
 
-            $missingFromMain = Compare-Object -ReferenceObject $moduleFiles -DifferenceObject $declaredModules -PassThru | Where-Object { $_ -in $moduleFiles }
-            $missingFromMain | Should -BeNullOrEmpty
+            foreach ($moduleMatch in $moduleMatches) {
+                $declaredModules = [regex]::Matches($moduleMatch.Groups['content'].Value, '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value }
+                $declaredModules = @($declaredModules | Where-Object { $_ -ne "" })
 
-            $unusedInMain = Compare-Object -ReferenceObject $declaredModules -DifferenceObject $moduleFiles -PassThru | Where-Object { $_ -in $declaredModules }
-            $unusedInMain | Should -BeNullOrEmpty
+                $missingFromMain = Compare-Object -ReferenceObject $moduleFiles -DifferenceObject $declaredModules -PassThru | Where-Object { $_ -in $moduleFiles }
+                $missingFromMain | Should -BeNullOrEmpty
+
+                $unusedInMain = Compare-Object -ReferenceObject $declaredModules -DifferenceObject $moduleFiles -PassThru | Where-Object { $_ -in $declaredModules }
+                $unusedInMain | Should -BeNullOrEmpty
+            }
+
+            $buildPath = Join-Path $script:ProjectRoot "build.ps1"
+            $buildContent = Get-Content $buildPath -Raw
+            $buildMatches = [regex]::Matches($buildContent, '\$modules\s*=\s*@\((?<content>[\s\S]*?)\)', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+            $buildMatches.Count | Should -BeGreaterThan 0
+
+            foreach ($buildMatch in $buildMatches) {
+                $declaredBuild = [regex]::Matches($buildMatch.Groups['content'].Value, '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value }
+                $declaredBuild = @($declaredBuild | Where-Object { $_ -ne "" })
+
+                $missingFromBuild = Compare-Object -ReferenceObject $moduleFiles -DifferenceObject $declaredBuild -PassThru | Where-Object { $_ -in $moduleFiles }
+                $missingFromBuild | Should -BeNullOrEmpty
+
+                $unusedInBuild = Compare-Object -ReferenceObject $declaredBuild -DifferenceObject $moduleFiles -PassThru | Where-Object { $_ -in $declaredBuild }
+                $unusedInBuild | Should -BeNullOrEmpty
+            }
         }
     }
 

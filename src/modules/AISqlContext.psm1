@@ -1,4 +1,4 @@
-#requires -Version 5.0
+﻿#requires -Version 5.0
 
 $script:DzAiSqlContextCache = $null
 

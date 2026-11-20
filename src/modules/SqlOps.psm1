@@ -414,6 +414,10 @@ function Show-AttachDialog {
             Paint-Progress -Percent 100 -Message "Completado"
             $script:AttachDone = $true
             if ($finalResult) {
+              if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                $st = if ($finalResult.Success) { 'OK' } else { 'ERROR' }
+                Write-DzAuditEvent -EventType 'DB_ATTACH' -Target "$Server/$($txtDbName.Text)" -Status $st -Details @{ mdf = $txtMdfPath.Text; ldf = $txtLdfPath.Text; message = $finalResult.Message }
+              }
               $window.Dispatcher.Invoke([action] {
                   if ($finalResult.Success) {
                     Ui-Info "Base de datos '$($txtDbName.Text)' adjuntada con éxito.`n`n$($finalResult.Message)" "✓ Adjuntar exitoso" $window
@@ -891,6 +895,9 @@ function Show-DetachDialog {
           $result1 = Invoke-SqlQuery -Server $Server -Database $Database -Query $updateQuery -Credential $Credential
           if (-not $result1.Success) {
             Write-DzDebug "`t[DEBUG][DetachDB] Error actualizando estadísticas: $($result1.ErrorMessage)"
+            if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+              Write-DzAuditEvent -EventType 'DB_DETACH' -Target "$Server/$Database" -Status 'ERROR' -Details @{ step = 'sp_updatestats'; error = $result1.ErrorMessage }
+            }
             Ui-Error "Error al actualizar estadísticas:`n`n$($result1.ErrorMessage)" "Error" $window
             return
           }
@@ -902,6 +909,9 @@ function Show-DetachDialog {
           $result2 = Invoke-SqlQuery -Server $Server -Database "master" -Query $closeQuery -Credential $Credential
           if (-not $result2.Success) {
             Write-DzDebug "`t[DEBUG][DetachDB] Error cerrando conexiones: $($result2.ErrorMessage)"
+            if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+              Write-DzAuditEvent -EventType 'DB_DETACH' -Target "$Server/$Database" -Status 'ERROR' -Details @{ step = 'single_user'; error = $result2.ErrorMessage }
+            }
             Ui-Error "Error al cerrar conexiones existentes:`n`n$($result2.ErrorMessage)" "Error" $window
             return
           }
@@ -912,6 +922,9 @@ function Show-DetachDialog {
         $result3 = Invoke-SqlQuery -Server $Server -Database "master" -Query $detachQuery -Credential $Credential
         if (-not $result3.Success) {
           Write-DzDebug "`t[DEBUG][DetachDB] Error separando BD: $($result3.ErrorMessage)"
+          if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+            Write-DzAuditEvent -EventType 'DB_DETACH' -Target "$Server/$Database" -Status 'ERROR' -Details @{ step = 'sp_detach_db'; error = $result3.ErrorMessage }
+          }
           if ($closeConnections) {
             try {
               $restoreQuery = "ALTER DATABASE [$safeName] SET MULTI_USER"
@@ -924,6 +937,9 @@ function Show-DetachDialog {
           return
         }
         Write-DzDebug "`t[DEBUG][DetachDB] Base de datos separada OK"
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+          Write-DzAuditEvent -EventType 'DB_DETACH' -Target "$Server/$Database" -Status 'OK' -Details @{ update_stats = $updateStats; close_connections = $closeConnections }
+        }
         Ui-Info "La base de datos '$Database' ha sido separada exitosamente.`n`nLos archivos físicos permanecen en el disco y pueden ser adjuntados nuevamente cuando lo necesites." "✓ Éxito" $window
         $serverNode = $ParentNode.Parent
         if ($serverNode -and $serverNode.Tag.Type -eq "Server") {
@@ -1835,6 +1851,11 @@ function Show-DatabaseRepairDialog {
             else { Paint-Progress -Percent 100 -Message "Completado" }
             $script:RepairDone = $true
             if ($finalResult) {
+              if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                $st = if ($finalResult.Success) { 'OK' } else { 'ERROR' }
+                $repOpt = if ($rbRepairFast.IsChecked) { 'REPAIR_FAST' } elseif ($rbRepairRebuild.IsChecked) { 'REPAIR_REBUILD' } elseif ($rbRepairAllowDataLoss.IsChecked) { 'REPAIR_ALLOW_DATA_LOSS' } else { 'CHECK' }
+                Write-DzAuditEvent -EventType 'DB_REPAIR' -Target "$Server/$Database" -Status $st -Details @{ option = $repOpt; message = $finalResult.Message }
+              }
               $window.Dispatcher.Invoke([action] {
                   if ($finalResult.Success) { Ui-Info "Operación completada.`n`n$($finalResult.Message)`n`nRevisa el log para más detalles." "✓ Completado" $window }
                   else { Ui-Error "La operación falló:`n`n$($finalResult.Message)" "✗ Error" $window }
@@ -2694,6 +2715,10 @@ EXEC master.dbo.xp_cmdshell @Cmd, NO_OUTPUT
             Paint-Progress -Percent 100 -Message "Completado"
             $script:RestoreDone = $true
             if ($finalResult -and $window) {
+              if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                $st = if ($finalResult.Success) { 'OK' } else { 'ERROR' }
+                Write-DzAuditEvent -EventType 'DB_RESTORE' -Target "$Server/$($txtDestino.Text)" -Status $st -Details @{ backup_path = $txtBackupPath.Text; message = $finalResult.Message }
+              }
               $window.Dispatcher.Invoke([action] {
                   if ($finalResult.Success) {
                     Ui-Info "Base de datos '$($txtDestino.Text)' restaurada con éxito.`n`n$($finalResult.Message)" "✓ Restauración Exitosa" $window
@@ -4198,6 +4223,15 @@ function Show-BackupDialog {
             $script:BackupDone = $true
             if (-not $script:DonePopupShown) {
               $script:DonePopupShown = $true
+              if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                $stBk = if ($script:LastDoneStatus -eq "OK") { "OK" } elseif ($script:LastDoneStatus -eq "WARN") { "WARN" } else { "ERROR" }
+                Write-DzAuditEvent -EventType 'DB_BACKUP' -Target "$Server/$Database" -Status $stBk -Details @{
+                    compress       = ($chkComprimir.IsChecked -eq $true)
+                    include_sqlite = ($chkIncludeSqlite.IsChecked -eq $true)
+                    cloud_upload   = ($chkCloudUpload.IsChecked -eq $true)
+                    file_name      = [string]$txtNombre.Text
+                }
+              }
               if ($script:LastDoneStatus -eq "OK") {
                 Ui-Info "Respaldo finalizado." "Información" $window
               } elseif ($script:LastDoneStatus -eq "WARN") {

@@ -1,15 +1,17 @@
-#requires -Version 5.0
+﻿#requires -Version 5.0
 #SqliteOps.psm1 - SQLite runtime and cleaner tools for DzTools
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 try { Add-Type -AssemblyName System.Data -ErrorAction Stop } catch { try { Add-Type -AssemblyName System.Data.Common -ErrorAction SilentlyContinue } catch {} }
 
-$script:DzSqliteResourceDir = "C:\temp\dztools\release\resources"
+$script:DzSqliteResourceDir = "C:\Temp\dztools\runtime"
+$script:DzSqliteLegacyResourceDir = "C:\temp\dztools\release\resources"
 $script:DzSqliteZipName = "sqlite-dll-win-x64-3530200.zip"
 $script:DzSqliteDllName = "sqlite3.dll"
 $script:DzSqliteRawUrl = "https://raw.githubusercontent.com/water0n/dztools/main/sqlite-dll-win-x64-3530200.zip"
 $script:DzSqliteZipSha256 = "5D40DE68DA94CEE0FBB01A7CAAE96C9226872549FB007E826F63CD7BB464B463"
+$script:DzSqliteDllSha256 = "73B045C910FC19A069BAE2E2C7EBB5EA66FE6C85F166535A6E07E09155CD9E6D"
 $script:DzSqliteDefaultDbPath = "C:\NationalSoft\nspfmsync.db"
 
 function Write-DzSqliteDebug {
@@ -108,6 +110,12 @@ namespace DzTools.Sqlite
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         public static extern bool SetDllDirectory(string lpPathName);
 
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern IntPtr LoadLibrary(string lpLibFileName);
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern IntPtr GetModuleHandle(string lpModuleName);
+
         [DllImport("sqlite3.dll", CallingConvention = CallingConvention.Cdecl, EntryPoint = "sqlite3_open_v2")]
         private static extern int sqlite3_open_v2(byte[] filename, out IntPtr db, int flags, IntPtr vfs);
 
@@ -161,6 +169,15 @@ namespace DzTools.Sqlite
             if (!SetDllDirectory(directory))
             {
                 throw new InvalidOperationException("No se pudo registrar el directorio SQLite. Win32=" + Marshal.GetLastWin32Error());
+            }
+            string dllPath = System.IO.Path.Combine(directory, "sqlite3.dll");
+            if (GetModuleHandle("sqlite3.dll") == IntPtr.Zero && System.IO.File.Exists(dllPath))
+            {
+                IntPtr handle = LoadLibrary(dllPath);
+                if (handle == IntPtr.Zero)
+                {
+                    throw new InvalidOperationException("No se pudo cargar sqlite3.dll desde '" + dllPath + "'. Win32=" + Marshal.GetLastWin32Error());
+                }
             }
         }
 
@@ -345,8 +362,80 @@ namespace DzTools.Sqlite
 
 function Get-DzSqliteRuntimePath {
     [CmdletBinding()]
-    param()
-    Join-Path $script:DzSqliteResourceDir $script:DzSqliteDllName
+    param(
+        [string]$RuntimeDir = $script:DzSqliteResourceDir
+    )
+    Join-Path $RuntimeDir $script:DzSqliteDllName
+}
+
+function Get-DzFileSha256 {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath
+    )
+
+    if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
+        throw "Archivo no encontrado para calcular SHA256: $FilePath"
+    }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::Open($FilePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        $hashBytes = $sha.ComputeHash($stream)
+        return ([BitConverter]::ToString($hashBytes)).Replace('-', '').ToUpperInvariant()
+    } finally {
+        if ($stream) { $stream.Dispose() }
+        if ($sha) { $sha.Dispose() }
+    }
+}
+
+function Write-DzSqliteDllHashFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$DllPath,
+        [Parameter(Mandatory = $true)][string]$Hash
+    )
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText("$DllPath.sha256", $Hash.ToUpperInvariant(), $utf8NoBom)
+}
+
+function Test-DzSqliteDllHash {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$DllPath
+    )
+
+    if (-not (Test-Path -LiteralPath $DllPath -PathType Leaf)) { return $false }
+    try {
+        $actualHash = Get-DzFileSha256 -FilePath $DllPath
+        if ($actualHash -ne $script:DzSqliteDllSha256) {
+            return $false
+        }
+        $sidecarPath = "$DllPath.sha256"
+        if (Test-Path -LiteralPath $sidecarPath -PathType Leaf) {
+            $recorded = ([System.IO.File]::ReadAllText($sidecarPath, [System.Text.Encoding]::UTF8)).Trim().ToUpperInvariant()
+            if ($recorded -ne $actualHash) {
+                return $false
+            }
+        } else {
+            try { Write-DzSqliteDllHashFile -DllPath $DllPath -Hash $actualHash } catch {}
+        }
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Test-DzSqliteRuntimeAvailable {
+    [CmdletBinding()]
+    param(
+        [string]$RuntimeDir = $script:DzSqliteResourceDir
+    )
+
+    if (-not [Environment]::Is64BitProcess) { return $false }
+    $dllPath = Get-DzSqliteRuntimePath -RuntimeDir $RuntimeDir
+    return (Test-DzSqliteDllHash -DllPath $dllPath)
 }
 
 function Test-DzSqliteZipHash {
@@ -356,7 +445,7 @@ function Test-DzSqliteZipHash {
         [string]$ZipPath
     )
 
-    $hash = (Get-FileHash -LiteralPath $ZipPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToUpperInvariant()
+    $hash = Get-DzFileSha256 -FilePath $ZipPath
     if ($hash -ne $script:DzSqliteZipSha256) {
         throw "El hash SHA256 del runtime SQLite no coincide. Esperado: $script:DzSqliteZipSha256. Recibido: $hash"
     }
@@ -392,6 +481,14 @@ function Expand-DzSqliteRuntimeZip {
                 if ($outStream) { $outStream.Dispose() }
                 if ($inStream) { $inStream.Dispose() }
             }
+            if ($entry.FullName -eq $script:DzSqliteDllName) {
+                $dllHash = Get-DzFileSha256 -FilePath $target
+                if ($dllHash -ne $script:DzSqliteDllSha256) {
+                    Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+                    throw "El hash SHA256 de sqlite3.dll extraído no coincide. Esperado: $script:DzSqliteDllSha256. Recibido: $dllHash"
+                }
+                Write-DzSqliteDllHashFile -DllPath $target -Hash $dllHash
+            }
         }
     } finally {
         $zip.Dispose()
@@ -404,7 +501,8 @@ function Save-DzSqliteRuntimeZip {
         [Parameter(Mandatory = $true)]
         [string]$OutFile,
 
-        [System.Windows.Window]$ProgressWindow
+        [AllowNull()]
+        [System.Windows.Window]$ProgressWindow = $null
     )
 
     $tmp = "$OutFile.download"
@@ -413,10 +511,22 @@ function Save-DzSqliteRuntimeZip {
     }
 
     if (Get-Command Download-FileWithProgressWpfStream -ErrorAction SilentlyContinue) {
-        Download-FileWithProgressWpfStream -Url $script:DzSqliteRawUrl -OutFile $tmp -Window $ProgressWindow | Out-Null
+        if ($ProgressWindow) {
+            Download-FileWithProgressWpfStream -Url $script:DzSqliteRawUrl -OutFile $tmp -Window $ProgressWindow | Out-Null
+        } else {
+            Write-Host "  ⏳ Descargando runtime SQLite (sqlite3.dll)..." -ForegroundColor DarkCyan
+            Download-FileWithProgressWpfStream -Url $script:DzSqliteRawUrl -OutFile $tmp | Out-Null
+        }
     } else {
+        Write-Host "  ⏳ Descargando runtime SQLite (sqlite3.dll)..." -ForegroundColor DarkCyan
         try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
-        Invoke-WebRequest -Uri $script:DzSqliteRawUrl -OutFile $tmp -UseBasicParsing -ErrorAction Stop
+        $wc = New-Object System.Net.WebClient
+        try {
+            $wc.Headers.Add("User-Agent", "DzTools-SQLite-Runtime")
+            $wc.DownloadFile($script:DzSqliteRawUrl, $tmp)
+        } finally {
+            $wc.Dispose()
+        }
     }
 
     Test-DzSqliteZipHash -ZipPath $tmp
@@ -426,27 +536,69 @@ function Save-DzSqliteRuntimeZip {
 function Initialize-DzSqliteRuntime {
     [CmdletBinding()]
     param(
-        [System.Windows.Window]$Owner,
-        [System.Windows.Window]$ProgressWindow
+        [AllowNull()]
+        [System.Windows.Window]$Owner = $null,
+        [AllowNull()]
+        [System.Windows.Window]$ProgressWindow = $null,
+        [string]$RuntimeDir = $script:DzSqliteResourceDir,
+        [string]$LocalZipPath = "",
+        [switch]$NoDownload
     )
 
     if (-not [Environment]::Is64BitProcess) {
         throw "El runtime descargado es x64. Abre DzTools con PowerShell de 64 bits."
     }
 
-    if (-not (Test-Path -LiteralPath $script:DzSqliteResourceDir)) {
-        New-Item -ItemType Directory -Path $script:DzSqliteResourceDir -Force | Out-Null
+    if (-not (Test-Path -LiteralPath $RuntimeDir)) {
+        New-Item -ItemType Directory -Path $RuntimeDir -Force | Out-Null
     }
 
-    $dllPath = Get-DzSqliteRuntimePath
+    $dllPath = Get-DzSqliteRuntimePath -RuntimeDir $RuntimeDir
     if (Test-Path -LiteralPath $dllPath -PathType Leaf) {
-        if ($ProgressWindow) { Update-WpfProgressBar -Window $ProgressWindow -Percent 100 -Message "Runtime SQLite encontrado." }
-        Import-DzSqliteNativeClient -DllPath $dllPath
-        return $dllPath
+        if (Test-DzSqliteDllHash -DllPath $dllPath) {
+            if ($ProgressWindow) { Update-WpfProgressBar -Window $ProgressWindow -Percent 100 -Message "Runtime SQLite encontrado." }
+            Import-DzSqliteNativeClient -DllPath $dllPath
+            return $dllPath
+        }
+        Write-DzSqliteDebug -Message "sqlite3.dll local no coincide con SHA256 esperado; se reemplazara." -Color ([System.ConsoleColor]::Yellow)
+        Remove-Item -LiteralPath $dllPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath "$dllPath.sha256" -Force -ErrorAction SilentlyContinue
     }
 
-    $zipPath = Join-Path $script:DzSqliteResourceDir $script:DzSqliteZipName
+    if ($RuntimeDir -eq $script:DzSqliteResourceDir -and (Test-Path -LiteralPath $script:DzSqliteLegacyResourceDir -PathType Container)) {
+        $legacyDll = Join-Path $script:DzSqliteLegacyResourceDir $script:DzSqliteDllName
+        if (Test-DzSqliteDllHash -DllPath $legacyDll) {
+            Copy-Item -LiteralPath $legacyDll -Destination $dllPath -Force -ErrorAction Stop
+            $legacyDef = Join-Path $script:DzSqliteLegacyResourceDir "sqlite3.def"
+            if (Test-Path -LiteralPath $legacyDef -PathType Leaf) {
+                Copy-Item -LiteralPath $legacyDef -Destination (Join-Path $RuntimeDir "sqlite3.def") -Force -ErrorAction SilentlyContinue
+            }
+            Write-DzSqliteDllHashFile -DllPath $dllPath -Hash $script:DzSqliteDllSha256
+            $legacyZip = Join-Path $script:DzSqliteLegacyResourceDir $script:DzSqliteZipName
+            $runtimeZip = Join-Path $RuntimeDir $script:DzSqliteZipName
+            if ((Test-Path -LiteralPath $legacyZip -PathType Leaf) -and -not (Test-Path -LiteralPath $runtimeZip -PathType Leaf)) {
+                try {
+                    Test-DzSqliteZipHash -ZipPath $legacyZip
+                    Copy-Item -LiteralPath $legacyZip -Destination $runtimeZip -Force -ErrorAction SilentlyContinue
+                } catch {}
+            }
+            Write-DzSqliteDebug -Message "Runtime SQLite migrado desde carpeta release a $RuntimeDir." -Color ([System.ConsoleColor]::Green)
+            if ($ProgressWindow) { Update-WpfProgressBar -Window $ProgressWindow -Percent 100 -Message "Runtime SQLite migrado." }
+            Import-DzSqliteNativeClient -DllPath $dllPath
+            return $dllPath
+        }
+    }
+
+    $zipPath = Join-Path $RuntimeDir $script:DzSqliteZipName
+    if (-not (Test-Path -LiteralPath $zipPath -PathType Leaf) -and -not [string]::IsNullOrWhiteSpace($LocalZipPath) -and (Test-Path -LiteralPath $LocalZipPath -PathType Leaf)) {
+        Test-DzSqliteZipHash -ZipPath $LocalZipPath
+        Copy-Item -LiteralPath $LocalZipPath -Destination $zipPath -Force -ErrorAction Stop
+    }
+
     if (-not (Test-Path -LiteralPath $zipPath -PathType Leaf)) {
+        if ($NoDownload) {
+            throw "No se encontro el runtime SQLite en '$RuntimeDir' y la descarga esta deshabilitada."
+        }
         if ($ProgressWindow) { Update-WpfProgressBar -Window $ProgressWindow -Percent 10 -Message "Descargando runtime SQLite..." }
         Save-DzSqliteRuntimeZip -OutFile $zipPath -ProgressWindow $ProgressWindow
     } else {
@@ -455,16 +607,19 @@ function Initialize-DzSqliteRuntime {
             Test-DzSqliteZipHash -ZipPath $zipPath
         } catch {
             Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+            if ($NoDownload) {
+                throw "El archivo local $zipPath esta corrupto y la descarga esta deshabilitada."
+            }
             if ($ProgressWindow) { Update-WpfProgressBar -Window $ProgressWindow -Percent 10 -Message "Runtime local invalido. Descargando nuevamente..." }
             Save-DzSqliteRuntimeZip -OutFile $zipPath -ProgressWindow $ProgressWindow
         }
     }
 
     if ($ProgressWindow) { Update-WpfProgressBar -Window $ProgressWindow -Percent 80 -Message "Extrayendo sqlite3.dll..." }
-    Expand-DzSqliteRuntimeZip -ZipPath $zipPath -DestinationPath $script:DzSqliteResourceDir
+    Expand-DzSqliteRuntimeZip -ZipPath $zipPath -DestinationPath $RuntimeDir
 
-    if (-not (Test-Path -LiteralPath $dllPath -PathType Leaf)) {
-        throw "No se pudo extraer sqlite3.dll desde $zipPath"
+    if (-not (Test-DzSqliteDllHash -DllPath $dllPath)) {
+        throw "No se pudo extraer o verificar sqlite3.dll desde $zipPath"
     }
 
     if ($ProgressWindow) { Update-WpfProgressBar -Window $ProgressWindow -Percent 100 -Message "SQLite listo." }
@@ -1366,8 +1521,14 @@ function Show-DzSqliteCleanerDialog {
             & $loadTable
             $setStatus.Invoke("Limpieza completada. Registros eliminados: $deleted", "Ok")
             & $logDebug -Message "Limpieza completada. Eliminados=$deleted" -Color ([System.ConsoleColor]::Green)
+            if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                Write-DzAuditEvent -EventType 'SQLITE_CLEAN' -Target "$dbPath/$tableName" -Status 'OK' -Details @{ column = [string]$columnItem.Tag; mode = $mode; deleted = $deleted }
+            }
         } catch {
             & $logError -Context "Limpiando registros SQLite" -ErrorRecord $_
+            if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                Write-DzAuditEvent -EventType 'SQLITE_CLEAN' -Target "$dbPath/$tableName" -Status 'ERROR' -Details @{ error = $_.Exception.Message }
+            }
             $setStatus.Invoke("Error durante la limpieza: $($_.Exception.Message)", "Error")
             Show-WpfMessageBox -Message "No se pudo limpiar.`n`n$($_.Exception.Message)" -Title "SQLite" -Buttons OK -Icon Error -Owner $w | Out-Null
         }
@@ -1385,6 +1546,9 @@ function Show-DzSqliteCleanerDialog {
             & $setBackupControls $true
             $setStatus.Invoke("Respaldo creado: $backupPath", "Ok")
             & $logDebug -Message "Respaldo creado: $backupPath" -Color ([System.ConsoleColor]::Green)
+            if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                Write-DzAuditEvent -EventType 'SQLITE_BACKUP' -Target $dbPath -Status 'OK' -Details @{ backup_path = $backupPath }
+            }
             Show-WpfMessageBox -Message "Respaldo creado:`n$backupPath" -Title "SQLite" -Buttons OK -Icon Information -Owner $w | Out-Null
         } catch {
             & $logError -Context "Creando respaldo SQLite" -ErrorRecord $_
@@ -1419,6 +1583,9 @@ function Show-DzSqliteCleanerDialog {
                 & $loadTable
                 $setStatus.Invoke("Query de escritura ejecutado.", "Ok")
                 & $logDebug -Message "Query escritura finalizado. Cambios=$affected" -Color ([System.ConsoleColor]::Green)
+                if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                    Write-DzAuditEvent -EventType 'SQLITE_QUERY_WRITE' -Target $dbPath -Status 'OK' -Details @{ changes = $affected }
+                }
             }
         } catch {
             & $logError -Context "Ejecutando query SQLite" -ErrorRecord $_
@@ -1788,6 +1955,9 @@ function Show-DzSqliteLogEventsCleanerDialog {
             $dt = Get-DzSqliteLogEvents -DbPath $dbPath -DllPath $dllPath -Limit 200
             $dgLogEvents.ItemsSource = $dt.DefaultView
             $setStatus.Invoke("Limpieza completada. Registros eliminados: $deleted.", "Ok")
+            if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                Write-DzAuditEvent -EventType 'SQLITE_CLEAN' -Target "$dbPath/LogEvents" -Status 'OK' -Details @{ before_date = $date.ToString('yyyy-MM-dd'); deleted = $deleted }
+            }
             Show-WpfMessageBox -Message "Limpieza completada.`nRegistros eliminados: $deleted" -Title "SQLite" -Buttons OK -Icon Information -Owner $w | Out-Null
         } catch {
             $setStatus.Invoke("Error durante la limpieza: $($_.Exception.Message)", "Error")
@@ -1814,6 +1984,8 @@ function Show-DzSqliteLogEventsCleanerDialog {
 
 Export-ModuleMember -Function @(
     'Initialize-DzSqliteRuntime',
+    'Get-DzSqliteRuntimePath',
+    'Test-DzSqliteRuntimeAvailable',
     'Invoke-DzSqliteQuery',
     'Invoke-DzSqliteNonQuery',
     'Get-DzSqliteLogEventsSummary',

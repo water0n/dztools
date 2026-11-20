@@ -1,9 +1,27 @@
 ﻿$script:QueriesConfigPath = "C:\Temp\dztools\Queries.ini"
 $script:MaxHistoryItems = 100
 #QueriesPad.psm1
+function Test-DzStorageModuleActiveInPad {
+    [CmdletBinding()]
+    param()
+    $cmd = Get-Command Get-DzStorageMode -ErrorAction SilentlyContinue
+    if (-not $cmd) { return $false }
+    try {
+        return ((Get-DzStorageMode) -ne 'uninitialized')
+    } catch {
+        return $false
+    }
+}
+
 function Initialize-QueriesConfig {
     [CmdletBinding()]
     param()
+    if (Get-Command Initialize-DzStorage -ErrorAction SilentlyContinue) {
+        if (-not (Test-DzStorageModuleActiveInPad)) {
+            [void](Initialize-DzStorage)
+        }
+        return $true
+    }
     $configDir = Split-Path $script:QueriesConfigPath -Parent
     if (-not (Test-Path -LiteralPath $configDir)) {
         try {
@@ -48,18 +66,25 @@ function Add-QueryToHistory {
         [Parameter()]
         [int]$RowsAffected = 0,
         [Parameter()]
-        [string]$ErrorMessage = ""
+        [string]$ErrorMessage = "",
+        [Parameter()]
+        [AllowNull()][Nullable[int64]]$DurationMs = $null,
+        [Parameter()]
+        [string]$ResultSummary = ""
     )
     try {
+        if (Test-DzStorageModuleActiveInPad) {
+            return (Add-DzQueryHistoryRecord -Query $Query -Database $Database -Server $Server -Success $Success -RowsAffected $RowsAffected -ErrorMessage $ErrorMessage -DurationMs $DurationMs -ResultSummary $ResultSummary)
+        }
         if (-not (Initialize-QueriesConfig)) {
             Write-DzDebug "`t[DEBUG][Queries] No se pudo inicializar configuración" Yellow
-            return
+            return $null
         }
         $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
         $cleanQuery = ($Query -replace '\s+', ' ').Trim()
         $preview = if ($cleanQuery.Length -gt 100) { $cleanQuery.Substring(0, 97) + "..." } else { $cleanQuery }
         $hash = Get-StringHash -InputString $Query
-        $resultInfo = if ($Success) { if ($RowsAffected -gt 0) { "OK ($RowsAffected filas)" } else { "OK" } } else { "ERROR: $($ErrorMessage.Substring(0, [Math]::Min(50, $ErrorMessage.Length)))" }
+        $resultInfo = if (-not [string]::IsNullOrWhiteSpace($ResultSummary)) { $ResultSummary } elseif ($Success) { if ($RowsAffected -gt 0) { "OK ($RowsAffected filas)" } else { "OK" } } else { "ERROR: $($ErrorMessage.Substring(0, [Math]::Min(50, $ErrorMessage.Length)))" }
         $queryBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($Query))
         $historyLine = "$timestamp|$Server|$Database|$hash|$preview|$resultInfo|$queryBase64"
         $content = Get-Content -LiteralPath $script:QueriesConfigPath -ErrorAction Stop
@@ -99,17 +124,43 @@ function Add-QueryToHistory {
         }
         Set-Content -LiteralPath $script:QueriesConfigPath -Value $lines -Encoding UTF8
         Write-DzDebug "`t[DEBUG][Queries] Query agregado al historial: $preview"
+        return $null
     } catch {
         Write-DzDebug "`t[DEBUG][Queries] Error agregando al historial: $_" Red
+        return $null
     }
 }
 function Get-QueryHistory {
     [CmdletBinding()]
     param(
         [Parameter()]
-        [int]$MaxItems = 50
+        [int]$MaxItems = 0,
+        [Parameter()]
+        [int]$PageSize = 0,
+        [Parameter()]
+        [string]$Search = "",
+        [Parameter()]
+        [string]$Server = "",
+        [Parameter()]
+        [string]$Database = "",
+        [Parameter()]
+        [ValidateSet('All', 'Ok', 'Error')][string]$Status = 'All',
+        [Parameter()]
+        [AllowNull()][Nullable[datetime]]$From = $null,
+        [Parameter()]
+        [AllowNull()][Nullable[datetime]]$To = $null,
+        [Parameter()]
+        [switch]$FavoritesOnly,
+        [Parameter()]
+        [string]$AfterExecutedAt = "",
+        [Parameter()]
+        [int64]$AfterId = 0
     )
     try {
+        if (Test-DzStorageModuleActiveInPad) {
+            return (Get-DzQueryHistoryRecords -MaxItems $MaxItems -PageSize $PageSize -Search $Search -Server $Server -Database $Database -Status $Status -From $From -To $To -FavoritesOnly:$FavoritesOnly -AfterExecutedAt $AfterExecutedAt -AfterId $AfterId)
+        }
+        $legacyLimit = if ($MaxItems -gt 0) { $MaxItems } elseif ($PageSize -gt 0) { $PageSize } else { 50 }
         if (-not (Test-Path -LiteralPath $script:QueriesConfigPath)) {
             Write-DzDebug "`t[DEBUG][Queries] Archivo de historial no existe"
             return @()
@@ -134,41 +185,53 @@ function Get-QueryHistory {
                         $queryBytes = [Convert]::FromBase64String($parts[5])
                         $fullQuery = [System.Text.Encoding]::UTF8.GetString($queryBytes)
                         $history.Add([PSCustomObject]@{
-                                Timestamp = $parts[0]
-                                Server    = ""
-                                Database  = $parts[1]
-                                Hash      = $parts[2]
-                                Preview   = $parts[3]
-                                Result    = $parts[4]
-                                FullQuery = $fullQuery
-                                Success   = $parts[4] -match '^OK'
+                                Id           = [int64]0
+                                Timestamp    = $parts[0]
+                                Server       = ""
+                                Database     = $parts[1]
+                                Hash         = $parts[2]
+                                Preview      = $parts[3]
+                                Result       = $parts[4]
+                                FullQuery    = $fullQuery
+                                Success      = $parts[4] -match '^OK'
+                                RowsAffected = $null
+                                DurationMs   = $null
+                                DurationText = "--"
+                                ErrorMessage = ""
+                                IsFavorite   = $false
+                                FavoriteIcon = "☆"
                             })
                     } catch {
                         # Línea con formato antiguo o corrupto - se omite silenciosamente
-                        # Write-DzDebug "`t[DEBUG][Queries] Error parseando línea antigua: $_" Yellow
                     }
                 } elseif ($parts.Count -ge 7) {
                     try {
                         $queryBytes = [Convert]::FromBase64String($parts[6])
                         $fullQuery = [System.Text.Encoding]::UTF8.GetString($queryBytes)
                         $history.Add([PSCustomObject]@{
-                                Timestamp = $parts[0]
-                                Server    = $parts[1]
-                                Database  = $parts[2]
-                                Hash      = $parts[3]
-                                Preview   = $parts[4]
-                                Result    = $parts[5]
-                                FullQuery = $fullQuery
-                                Success   = $parts[5] -match '^OK'
+                                Id           = [int64]0
+                                Timestamp    = $parts[0]
+                                Server       = $parts[1]
+                                Database     = $parts[2]
+                                Hash         = $parts[3]
+                                Preview      = $parts[4]
+                                Result       = $parts[5]
+                                FullQuery    = $fullQuery
+                                Success      = $parts[5] -match '^OK'
+                                RowsAffected = $null
+                                DurationMs   = $null
+                                DurationText = "--"
+                                ErrorMessage = ""
+                                IsFavorite   = $false
+                                FavoriteIcon = "☆"
                             })
                     } catch {
                         # Línea con formato nuevo pero corrupto - se omite silenciosamente
-                        # Write-DzDebug "`t[DEBUG][Queries] Error parseando línea nueva: $_" Yellow
                     }
                 }
             }
         }
-        $history = @([Linq.Enumerable]::Reverse($history) | Select-Object -First $MaxItems)
+        $history = @([Linq.Enumerable]::Reverse($history) | Select-Object -First $legacyLimit)
         Write-DzDebug "`t[DEBUG][Queries] Historial cargado: $($history.Count) items"
         return $history
     } catch {
@@ -178,8 +241,11 @@ function Get-QueryHistory {
 }
 function Clear-QueryHistory {
     [CmdletBinding()]
-    param()
+    param([switch]$KeepFavorites)
     try {
+        if ((Test-DzStorageModuleActiveInPad) -and (Get-DzStorageMode) -eq 'sqlite') {
+            return (Clear-DzQueryHistoryRecords -KeepFavorites:$KeepFavorites)
+        }
         if (-not (Test-Path -LiteralPath $script:QueriesConfigPath)) { return $true }
         $content = Get-Content -LiteralPath $script:QueriesConfigPath -ErrorAction Stop
         $lines = New-Object System.Collections.Generic.List[string]
@@ -205,6 +271,9 @@ function Remove-QueriesFromHistory {
         [Array]$Items
     )
     try {
+        if ((Test-DzStorageModuleActiveInPad) -and (Get-DzStorageMode) -eq 'sqlite') {
+            return (Remove-DzQueryHistoryRecords -Items $Items)
+        }
         if (-not (Test-Path -LiteralPath $script:QueriesConfigPath)) {
             return $false
         }
@@ -255,6 +324,36 @@ function Save-OpenQueryTabs {
         [System.Windows.Controls.TabControl]$TabControl
     )
     try {
+        if ((Test-DzStorageModuleActiveInPad) -and (Get-DzStorageMode) -eq 'sqlite') {
+            $tabRecords = New-Object System.Collections.Generic.List[object]
+            $tabIndex = 0
+            $selectedItem = $TabControl.SelectedItem
+            foreach ($item in $TabControl.Items) {
+                if ($item -isnot [System.Windows.Controls.TabItem]) { continue }
+                if (-not $item.Tag -or $item.Tag.Type -ne 'QueryTab') { continue }
+                $editor = $item.Tag.Editor
+                if (-not $editor) { continue }
+                $queryText = Get-SqlEditorText -Editor $editor
+                $filePath = if ($item.Tag.PSObject.Properties['FilePath']) { [string]$item.Tag.FilePath } else { "" }
+                if ([string]::IsNullOrWhiteSpace($queryText) -and [string]::IsNullOrWhiteSpace($filePath)) { continue }
+                $title = if ($item.Tag.Title) { [string]$item.Tag.Title } else { "Query$($tabIndex + 1)" }
+                $dbName = if ($item.Tag.PSObject.Properties['Database']) { [string]$item.Tag.Database } else { "" }
+                $srvName = if ($global:server) { [string]$global:server } else { "" }
+                $tabRecords.Add([pscustomobject]@{
+                        TabIndex  = $tabIndex
+                        Title     = $title
+                        QueryText = [string]$queryText
+                        IsDirty   = [bool]$item.Tag.IsDirty
+                        IsActive  = ($item -eq $selectedItem)
+                        FilePath  = $filePath
+                        Database  = $dbName
+                        Server    = $srvName
+                    })
+                $tabIndex++
+            }
+            return (Save-DzOpenQueryTabsData -Tabs $tabRecords.ToArray())
+        }
+
         if (-not (Initialize-QueriesConfig)) {
             Write-DzDebug "`t[DEBUG][Queries] No se pudo inicializar configuración" Yellow
             return $false
@@ -262,7 +361,6 @@ function Save-OpenQueryTabs {
         Write-DzDebug "`t[DEBUG][Queries] Guardando pestañas abiertas..."
         $tabsData = New-Object System.Collections.Generic.List[string]
         $tabIndex = 0
-        $selectedIndex = $TabControl.SelectedIndex
         foreach ($item in $TabControl.Items) {
             if ($item -isnot [System.Windows.Controls.TabItem]) { continue }
             if (-not $item.Tag -or $item.Tag.Type -ne 'QueryTab') { continue }
@@ -312,6 +410,52 @@ function Restore-OpenQueryTabs {
         [System.Windows.Controls.TabControl]$TabControl
     )
     try {
+        if ((Test-DzStorageModuleActiveInPad) -and (Get-DzStorageMode) -eq 'sqlite') {
+            $savedTabs = @(Get-DzOpenQueryTabsData)
+            if ($savedTabs.Count -eq 0) { return 0 }
+
+            $restoredCount = 0
+            $activeTabToSelect = $null
+            $lastTab = $null
+            foreach ($saved in $savedTabs) {
+                try {
+                    $newTab = New-QueryTab -TabControl $TabControl
+                    if ($newTab -and $newTab.Tag -and $newTab.Tag.Editor) {
+                        Set-SqlEditorText -Editor $newTab.Tag.Editor -Text $saved.QueryText
+                        if (-not [string]::IsNullOrWhiteSpace($saved.FilePath) -and (Test-Path -LiteralPath $saved.FilePath -PathType Leaf)) {
+                            $newTab.Tag.FilePath = $saved.FilePath
+                            $fileName = [System.IO.Path]::GetFileName($saved.FilePath)
+                            $newTab.Tag.Title = $fileName
+                            $newTab.Tag.TitleShort = $fileName
+                            $newTab.ToolTip = "$fileName`n$($saved.FilePath)"
+                        } elseif (-not [string]::IsNullOrWhiteSpace($saved.Title)) {
+                            $newTab.Tag.Title = $saved.Title
+                            $newTab.Tag.TitleShort = $saved.Title
+                            if ($newTab.Tag.HeaderTextBlock) { $newTab.Tag.HeaderTextBlock.Text = $saved.Title }
+                        }
+                        if (-not [string]::IsNullOrWhiteSpace($saved.Database)) {
+                            $newTab.Tag.Database = $saved.Database
+                        }
+                        $parsedNumber = Get-QueryTabNumberFromTitle -Title ([string]$newTab.Tag.Title)
+                        if ($parsedNumber) { $newTab.Tag.Number = $parsedNumber }
+                        $newTab.Tag.IsDirty = [bool]$saved.IsDirty
+                        Update-QueryTabHeader -TabItem $newTab
+                        $restoredCount++
+                        $lastTab = $newTab
+                        if ($saved.IsActive) { $activeTabToSelect = $newTab }
+                    }
+                } catch {
+                    Write-DzDebug "`t[DEBUG][Queries] Error restaurando tab desde DB: $_" Yellow
+                }
+            }
+            if ($activeTabToSelect) {
+                $TabControl.SelectedItem = $activeTabToSelect
+            } elseif ($lastTab) {
+                $TabControl.SelectedItem = $lastTab
+            }
+            return $restoredCount
+        }
+
         if (-not (Test-Path -LiteralPath $script:QueriesConfigPath)) {
             Write-DzDebug "`t[DEBUG][Queries] No hay archivo de configuración para restaurar"
             return 0
@@ -746,8 +890,24 @@ function Execute-QueryCore {
                             try { $errMsg = [string]$result.ErrorMessage } catch {}
                             if ($result.InnerError) { $errMsg += " | Inner: $($result.InnerError)" }
                         }
-                        Add-QueryToHistory -Query $rawQueryToSave -Database $dbToSave -Server $serverToSave -Success $ok -RowsAffected $rows -ErrorMessage $errMsg
-                        Write-DzDebug "`t[DEBUG][Queries] Historial guardado (DB='$dbToSave' Success=$ok Rows=$rows)"
+                        $durationMs = $null
+                        try {
+                            if ($result -and ($result -is [hashtable]) -and $result.ContainsKey('DurationMs') -and $null -ne $result.DurationMs) {
+                                $durationMs = [int64]$result.DurationMs
+                            } elseif ($script:execStopwatch) {
+                                $durationMs = [int64]$script:execStopwatch.ElapsedMilliseconds
+                            }
+                        } catch { $durationMs = $null }
+                        $historyId = Add-QueryToHistory -Query $rawQueryToSave -Database $dbToSave -Server $serverToSave -Success $ok -RowsAffected $rows -ErrorMessage $errMsg -DurationMs $durationMs
+                        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                            Write-DzAuditEvent -EventType 'SQL_QUERY' -Target "$serverToSave/$dbToSave" -Status $(if ($ok) { 'OK' } else { 'ERROR' }) -Details @{
+                                history_id    = $historyId
+                                duration_ms   = $durationMs
+                                rows_affected = $rows
+                                success       = $ok
+                            }
+                        }
+                        Write-DzDebug "`t[DEBUG][Queries] Historial guardado (DB='$dbToSave' Success=$ok Rows=$rows DurationMs=$durationMs)"
                     } catch {
                         Write-DzDebug "`t[DEBUG][Queries] Error guardando historial: $($_.Exception.Message)" Yellow
                     }
@@ -791,7 +951,8 @@ function Execute-QueryCore {
                     if ([string]::IsNullOrWhiteSpace($msg)) { $msg = "Error desconocido al ejecutar la consulta." }
                     if ($result -and $result.ResultSets -and $result.ResultSets.Count -gt 0) {
                         try {
-                            Show-MultipleResultSets -TabControl $global:tcResults -ResultSets $result.ResultSets
+                            $isStacked = if ($global:chkStackedResults) { $global:chkStackedResults.IsChecked -eq $true } else { $false }
+                            Show-MultipleResultSets -TabControl $global:tcResults -ResultSets $result.ResultSets -Stacked $isStacked
                             if ($global:txtMessages) {
                                 $currentText = $global:txtMessages.Text
                                 $global:txtMessages.Text = "ERROR: $msg`n`n$currentText"
@@ -818,7 +979,8 @@ function Execute-QueryCore {
                     } catch {}
                 }
                 if ($result.ResultSets -and $result.ResultSets.Count -gt 0) {
-                    try { Show-MultipleResultSets -TabControl $global:tcResults -ResultSets $result.ResultSets } catch {
+                    $isStacked = if ($global:chkStackedResults) { $global:chkStackedResults.IsChecked -eq $true } else { $false }
+                    try { Show-MultipleResultSets -TabControl $global:tcResults -ResultSets $result.ResultSets -Stacked $isStacked } catch {
                         if ($global:txtMessages) { $global:txtMessages.Text = "Error mostrando resultados: $($_.Exception.Message)" }
                     }
                     return
@@ -851,7 +1013,6 @@ function Execute-QueryCore {
                     return
                 }
                 Show-MultipleResultSets -TabControl $global:tcResults -ResultSets @()
-                if ($global:lblRowCount) { $global:lblRowCount.Text = "Filas: 0" }
             } catch {
                 $err = "[UI][QueryDoneTimer ERROR] $($_.Exception.Message)`n$($_.ScriptStackTrace)"
                 if ($global:txtMessages) { $global:txtMessages.Text = $err }
@@ -947,6 +1108,21 @@ function Set-QueryTabsDatabase {
     foreach ($item in $TabControl.Items) {
         if ($item -isnot [System.Windows.Controls.TabItem]) { continue }
         if (-not $item.Tag -or $item.Tag.Type -ne 'QueryTab') { continue }
+        if ($item.Tag.FilePath) {
+            $fileName = [System.IO.Path]::GetFileName($item.Tag.FilePath)
+            $shortTitle = if (-not [string]::IsNullOrWhiteSpace($Database)) {
+                if ($Database.Length -gt 7) { "$fileName (_$($Database.Substring($Database.Length - 7)))" } else { "$fileName ($Database)" }
+            } else {
+                $fileName
+            }
+            $fullTitle = if (-not [string]::IsNullOrWhiteSpace($Database)) { "$fileName ($Database)`n$($item.Tag.FilePath)" } else { "$fileName`n$($item.Tag.FilePath)" }
+            $item.Tag.Database = $Database
+            $item.Tag.Title = $fileName
+            $item.Tag.TitleShort = $shortTitle
+            $item.ToolTip = $fullTitle
+            Update-QueryTabHeader -TabItem $item
+            continue
+        }
         if (-not $item.Tag.Number) {
             $parsedNumber = Get-QueryTabNumberFromTitle -Title ([string]$item.Tag.Title)
             if ($parsedNumber) {
@@ -1033,6 +1209,7 @@ function New-QueryTab {
         IsDirty         = $false
         Number          = $tabNumber
         Database        = $dbName
+        FilePath        = $null
     }
     $editor.Add_TextChanged({
             $tabItem.Tag.IsDirty = $true
@@ -1061,6 +1238,73 @@ function New-QueryTab {
     [void]$TabControl.Items.Insert($insertIndex, $tabItem)
     $TabControl.SelectedItem = $tabItem
     return $tabItem
+}
+function Open-SqlFileInTab {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][System.Windows.Controls.TabControl]$TabControl,
+        [Parameter(Mandatory = $true)][string]$FilePath
+    )
+    if (-not (Test-Path -LiteralPath $FilePath)) {
+        throw "El archivo no existe: $FilePath"
+    }
+
+    $fileContent = ""
+    try {
+        $fileContent = [System.IO.File]::ReadAllText($FilePath, [System.Text.Encoding]::UTF8)
+    } catch {
+        try {
+            $fileContent = [System.IO.File]::ReadAllText($FilePath, [System.Text.Encoding]::Default)
+        } catch {
+            throw "No se pudo leer el archivo '$FilePath': $($_.Exception.Message)"
+        }
+    }
+
+    $fileName = [System.IO.Path]::GetFileName($FilePath)
+    $dbName = $null
+    if ($global:cmbDatabases -and (Get-Command Get-DbNameFromComboSelection -ErrorAction SilentlyContinue)) {
+        $dbName = Get-DbNameFromComboSelection -ComboBox $global:cmbDatabases
+    }
+
+    $targetTab = $null
+    $activeTab = Get-ActiveQueryTab -TabControl $TabControl
+    if ($activeTab -and $activeTab.Tag -and $activeTab.Tag.Editor) {
+        $currentText = Get-SqlEditorText -Editor $activeTab.Tag.Editor
+        if ([string]::IsNullOrWhiteSpace($currentText) -and -not $activeTab.Tag.IsDirty) {
+            $targetTab = $activeTab
+        }
+    }
+
+    if (-not $targetTab) {
+        $targetTab = New-QueryTab -TabControl $TabControl
+    }
+
+    if ($targetTab -and $targetTab.Tag -and $targetTab.Tag.Editor) {
+        $editor = $targetTab.Tag.Editor
+        Set-SqlEditorText -Editor $editor -Text $fileContent
+
+        $shortTitle = if (-not [string]::IsNullOrWhiteSpace($dbName)) {
+            if ($dbName.Length -gt 7) { "$fileName (_$($dbName.Substring($dbName.Length - 7)))" } else { "$fileName ($dbName)" }
+        } else {
+            $fileName
+        }
+        $fullTitle = if (-not [string]::IsNullOrWhiteSpace($dbName)) { "$fileName ($dbName)`n$FilePath" } else { "$fileName`n$FilePath" }
+
+        $targetTab.Tag.Title = $fileName
+        $targetTab.Tag.TitleShort = $shortTitle
+        $targetTab.Tag.FilePath = $FilePath
+        $targetTab.Tag.IsDirty = $false
+        $targetTab.ToolTip = $fullTitle
+        Update-QueryTabHeader -TabItem $targetTab
+
+        $TabControl.SelectedItem = $targetTab
+        try { $editor.Focus() | Out-Null } catch {}
+        if (Get-Command Write-DzDebug -ErrorAction SilentlyContinue) {
+            Write-DzDebug "`t[DEBUG][Open-SqlFileInTab] Archivo cargado en pestaña: '$fileName'"
+        }
+        return $targetTab
+    }
+    return $null
 }
 function Get-NextQueryNumber {
     param([Parameter(Mandatory = $true)][System.Windows.Controls.TabControl]$TabControl)
@@ -1719,7 +1963,7 @@ function Show-QueryHistoryWindow {
             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
             Title="Historial de Consultas SQL"
             SizeToContent="Manual"
-            Height="400" Width="800"
+            Height="580" Width="1060"
             WindowStartupLocation="CenterOwner"
             WindowStyle="None"
             ResizeMode="CanResize"
@@ -1727,7 +1971,7 @@ function Show-QueryHistoryWindow {
             Background="#66000000"
             AllowsTransparency="True"
             Topmost="True"
-            MinHeight="400" MinWidth="800">
+            MinHeight="480" MinWidth="880">
         <Window.Resources>
             <Style TargetType="TextBlock">
                 <Setter Property="Foreground" Value="{DynamicResource FormFg}"/>
@@ -1739,6 +1983,17 @@ function Show-QueryHistoryWindow {
                 <Setter Property="Foreground" Value="{DynamicResource ControlFg}"/>
                 <Setter Property="BorderBrush" Value="{DynamicResource BorderBrushColor}"/>
                 <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="FontFamily" Value="Consolas"/>
+                <Setter Property="FontSize" Value="11"/>
+            </Style>
+            <Style TargetType="CheckBox">
+                <Setter Property="Foreground" Value="{DynamicResource FormFg}"/>
+                <Setter Property="FontFamily" Value="Consolas"/>
+                <Setter Property="FontSize" Value="11"/>
+                <Setter Property="VerticalAlignment" Value="Center"/>
+            </Style>
+            <Style TargetType="ComboBox">
+                <Setter Property="Height" Value="24"/>
                 <Setter Property="FontFamily" Value="Consolas"/>
                 <Setter Property="FontSize" Value="11"/>
             </Style>
@@ -1803,22 +2058,15 @@ function Show-QueryHistoryWindow {
                     </Trigger>
                 </Style.Triggers>
             </Style>
-            <Style x:Key="OutlineButtonStyle" TargetType="Button" BasedOn="{StaticResource BaseButtonStyle}">
+            <Style x:Key="FavoriteButtonStyle" TargetType="Button" BasedOn="{StaticResource BaseButtonStyle}">
+                <Setter Property="Background" Value="{DynamicResource AccentAmber}"/>
+                <Setter Property="Foreground" Value="#111111"/>
+                <Setter Property="BorderThickness" Value="0"/>
                 <Style.Triggers>
                     <Trigger Property="IsMouseOver" Value="True">
-                        <Setter Property="Background" Value="{DynamicResource AccentSecondary}"/>
-                        <Setter Property="Foreground" Value="{DynamicResource FormFg}"/>
-                        <Setter Property="BorderThickness" Value="0"/>
+                        <Setter Property="Background" Value="{DynamicResource AccentAmberHover}"/>
                     </Trigger>
                 </Style.Triggers>
-            </Style>
-            <Style x:Key="CloseButtonStyle" TargetType="Button" BasedOn="{StaticResource BaseButtonStyle}">
-                <Setter Property="Width" Value="28"/>
-                <Setter Property="Height" Value="28"/>
-                <Setter Property="Padding" Value="0"/>
-                <Setter Property="FontSize" Value="14"/>
-                <Setter Property="FontWeight" Value="SemiBold"/>
-                <Setter Property="Content" Value="×"/>
             </Style>
         </Window.Resources>
         <Grid Background="Transparent">
@@ -1842,6 +2090,7 @@ function Show-QueryHistoryWindow {
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                         <Border Grid.Row="0" Name="brdTitleBar"
                                 Background="{DynamicResource PanelBg}"
@@ -1861,7 +2110,7 @@ function Show-QueryHistoryWindow {
                                         FontSize="13" FontWeight="SemiBold"
                                         Foreground="{DynamicResource AccentPrimary}"/>
                                 <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-                                    <TextBlock Name="lblHistoryCount" Text="0 consultas"
+                                    <TextBlock Name="lblHistoryCount" Text="Mostrando 0 de 0 consultas"
                                             FontSize="10" Foreground="{DynamicResource AccentMuted}"/>
                                     <TextBlock Text=" • " Margin="4,0" FontSize="10"
                                             Foreground="{DynamicResource AccentMuted}"/>
@@ -1870,7 +2119,7 @@ function Show-QueryHistoryWindow {
                                 </StackPanel>
                             </StackPanel>
                             <Button Grid.Column="1" Name="btnClose"
-                                    Content="Cerrar" Width="60" Height="26"
+                                    Content="Cerrar" Width="64" Height="26"
                                     Style="{StaticResource DatabaseButtonStyle}"
                                     Margin="8,0,0,0"
                                     HorizontalAlignment="Right"
@@ -1880,27 +2129,62 @@ function Show-QueryHistoryWindow {
 
                     <Border Grid.Row="1" Background="{DynamicResource PanelBg}"
                             BorderBrush="{DynamicResource BorderBrushColor}" BorderThickness="1"
-                            CornerRadius="8" Padding="6" Margin="0,0,0,6">
+                            CornerRadius="8" Padding="8" Margin="0,0,0,6">
                         <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="80"/>
-                                <ColumnDefinition Width="110"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBox Name="txtSearch" Grid.Column="0"
-                                    Height="24" Padding="6,2"
-                                    Margin="0,0,6,0"
-                                    MinWidth="120"/>
-                            <Button Name="btnClearSearch" Grid.Column="1"
-                                    Content="✖ Limpiar"
-                                    Height="24"
-                                    Style="{StaticResource DatabaseButtonStyle}"
-                                    Margin="0,0,4,0"/>
-                            <Button Name="btnRefresh" Grid.Column="2"
-                                    Content="🔄 Actualizar"
-                                    Height="24"
-                                    ToolTip="Actualizar"
-                                    Style="{StaticResource DatabaseButtonStyle}"/>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid Grid.Row="0" Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="84"/>
+                                    <ColumnDefinition Width="110"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="🔍 Buscar:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <TextBox Name="txtSearch" Grid.Column="1"
+                                        Height="24" Padding="6,2"
+                                        Margin="0,0,6,0"
+                                        ToolTip="Busca por texto SQL, servidor o base de datos"/>
+                                <Button Name="btnClearSearch" Grid.Column="2"
+                                        Content="✖ Limpiar"
+                                        Height="24"
+                                        Style="{StaticResource DatabaseButtonStyle}"
+                                        Margin="0,0,4,0"/>
+                                <Button Name="btnRefresh" Grid.Column="3"
+                                        Content="🔄 Actualizar"
+                                        Height="24"
+                                        ToolTip="Actualizar historial y filtros"
+                                        Style="{StaticResource DatabaseButtonStyle}"/>
+                            </Grid>
+                            <Grid Grid.Row="1">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="1.2*"/>
+                                    <ColumnDefinition Width="6"/>
+                                    <ColumnDefinition Width="1.2*"/>
+                                    <ColumnDefinition Width="6"/>
+                                    <ColumnDefinition Width="0.9*"/>
+                                    <ColumnDefinition Width="6"/>
+                                    <ColumnDefinition Width="1.0*"/>
+                                    <ColumnDefinition Width="10"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <ComboBox Name="cmbFilterServer" Grid.Column="0" ToolTip="Filtrar por servidor"/>
+                                <ComboBox Name="cmbFilterDatabase" Grid.Column="2" ToolTip="Filtrar por base de datos"/>
+                                <ComboBox Name="cmbFilterStatus" Grid.Column="4" ToolTip="Filtrar por estado">
+                                    <ComboBoxItem Content="Todos los estados" Tag="All" IsSelected="True"/>
+                                    <ComboBoxItem Content="Solo OK" Tag="Ok"/>
+                                    <ComboBoxItem Content="Solo Error" Tag="Error"/>
+                                </ComboBox>
+                                <ComboBox Name="cmbFilterPeriod" Grid.Column="6" ToolTip="Filtrar por periodo">
+                                    <ComboBoxItem Content="Todo el tiempo" Tag="All" IsSelected="True"/>
+                                    <ComboBoxItem Content="Hoy" Tag="Today"/>
+                                    <ComboBoxItem Content="Últimos 7 días" Tag="7d"/>
+                                    <ComboBoxItem Content="Últimos 30 días" Tag="30d"/>
+                                </ComboBox>
+                                <CheckBox Name="chkFilterFavorites" Grid.Column="8" Content="★ Solo favoritas"/>
+                            </Grid>
                         </Grid>
                     </Border>
 
@@ -1930,16 +2214,13 @@ function Show-QueryHistoryWindow {
                                 <Setter Property="Background" Value="{DynamicResource PanelBg}"/>
                                 <Setter Property="Foreground" Value="{DynamicResource PanelFg}"/>
                                 <Style.Triggers>
-                                    <!-- Efecto zebra (filas alternas) -->
                                     <Trigger Property="AlternationIndex" Value="1">
                                         <Setter Property="Background" Value="{DynamicResource ControlBg}"/>
                                     </Trigger>
-                                    <!-- IMPORTANTE: IsSelected debe estar DESPUÉS de AlternationIndex -->
                                     <Trigger Property="IsSelected" Value="True">
                                         <Setter Property="Background" Value="{DynamicResource AccentPrimary}"/>
                                         <Setter Property="Foreground" Value="{DynamicResource FormFg}"/>
                                     </Trigger>
-                                    <!-- Hover effect -->
                                     <MultiTrigger>
                                         <MultiTrigger.Conditions>
                                             <Condition Property="IsMouseOver" Value="True"/>
@@ -1952,7 +2233,6 @@ function Show-QueryHistoryWindow {
                             </Style>
                         </DataGrid.RowStyle>
 
-                        <!-- Estilos para los headers -->
                         <DataGrid.ColumnHeaderStyle>
                             <Style TargetType="DataGridColumnHeader">
                                 <Setter Property="Background" Value="{DynamicResource ControlBg}"/>
@@ -1965,7 +2245,6 @@ function Show-QueryHistoryWindow {
                             </Style>
                         </DataGrid.ColumnHeaderStyle>
 
-                        <!-- Estilos para las celdas -->
                         <DataGrid.CellStyle>
                             <Style TargetType="DataGridCell">
                                 <Setter Property="BorderThickness" Value="0"/>
@@ -1981,7 +2260,18 @@ function Show-QueryHistoryWindow {
                         </DataGrid.CellStyle>
 
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="📅 Fecha" Binding="{Binding Timestamp}" Width="120">
+                            <DataGridTextColumn Header="★" Binding="{Binding FavoriteIcon}" Width="30">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="VerticalAlignment" Value="Center"/>
+                                        <Setter Property="HorizontalAlignment" Value="Center"/>
+                                        <Setter Property="FontSize" Value="12"/>
+                                        <Setter Property="Foreground" Value="{DynamicResource AccentAmber}"/>
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+
+                            <DataGridTextColumn Header="📅 Fecha" Binding="{Binding Timestamp}" Width="132">
                                 <DataGridTextColumn.ElementStyle>
                                     <Style TargetType="TextBlock">
                                         <Setter Property="VerticalAlignment" Value="Center"/>
@@ -2003,7 +2293,7 @@ function Show-QueryHistoryWindow {
                                 </DataGridTextColumn.ElementStyle>
                             </DataGridTextColumn>
 
-                            <DataGridTextColumn Header="🗄️ DB" Binding="{Binding Database}" Width="120">
+                            <DataGridTextColumn Header="🗄️ DB" Binding="{Binding Database}" Width="115">
                                 <DataGridTextColumn.ElementStyle>
                                     <Style TargetType="TextBlock">
                                         <Setter Property="VerticalAlignment" Value="Center"/>
@@ -2028,13 +2318,37 @@ function Show-QueryHistoryWindow {
                                         <Setter Property="ToolTip">
                                             <Setter.Value>
                                                 <ToolTip MaxWidth="900">
-                                                    <TextBox Text="{Binding FullQuery}"
-                                                            IsReadOnly="True"
-                                                            TextWrapping="Wrap"
-                                                            BorderThickness="0"
-                                                            Background="Transparent"
-                                                            FontFamily="Consolas"
-                                                            FontSize="11"/>
+                                                    <StackPanel>
+                                                        <TextBox Text="{Binding FullQuery}"
+                                                                IsReadOnly="True"
+                                                                TextWrapping="Wrap"
+                                                                BorderThickness="0"
+                                                                Background="Transparent"
+                                                                FontFamily="Consolas"
+                                                                FontSize="11"/>
+                                                        <TextBox Text="{Binding ErrorMessage}"
+                                                                IsReadOnly="True"
+                                                                TextWrapping="Wrap"
+                                                                BorderThickness="0"
+                                                                Margin="0,6,0,0"
+                                                                Foreground="#DC2626"
+                                                                Background="Transparent"
+                                                                FontFamily="Consolas"
+                                                                FontSize="10">
+                                                            <TextBox.Style>
+                                                                <Style TargetType="TextBox">
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding ErrorMessage}" Value="">
+                                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding ErrorMessage}" Value="{x:Null}">
+                                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBox.Style>
+                                                        </TextBox>
+                                                    </StackPanel>
                                                 </ToolTip>
                                             </Setter.Value>
                                         </Setter>
@@ -2042,10 +2356,34 @@ function Show-QueryHistoryWindow {
                                 </DataGridTextColumn.ElementStyle>
                             </DataGridTextColumn>
 
-                            <DataGridTextColumn Header="✅ Estado" Binding="{Binding Result}" Width="140">
+                            <DataGridTextColumn Header="✅ Estado" Binding="{Binding Result}" Width="135">
                                 <DataGridTextColumn.ElementStyle>
                                     <Style TargetType="TextBlock">
                                         <Setter Property="VerticalAlignment" Value="Center"/>
+                                        <Setter Property="Padding" Value="4,0"/>
+                                        <Setter Property="FontFamily" Value="Consolas"/>
+                                        <Setter Property="FontSize" Value="10"/>
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+
+                            <DataGridTextColumn Header="⏱️ Duración" Binding="{Binding DurationText}" Width="75">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="VerticalAlignment" Value="Center"/>
+                                        <Setter Property="HorizontalAlignment" Value="Right"/>
+                                        <Setter Property="Padding" Value="4,0"/>
+                                        <Setter Property="FontFamily" Value="Consolas"/>
+                                        <Setter Property="FontSize" Value="10"/>
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
+
+                            <DataGridTextColumn Header="📊 Filas" Binding="{Binding RowsAffected}" Width="60">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="VerticalAlignment" Value="Center"/>
+                                        <Setter Property="HorizontalAlignment" Value="Right"/>
                                         <Setter Property="Padding" Value="4,0"/>
                                         <Setter Property="FontFamily" Value="Consolas"/>
                                         <Setter Property="FontSize" Value="10"/>
@@ -2056,7 +2394,14 @@ function Show-QueryHistoryWindow {
                     </DataGrid>
                     </Border>
 
-                    <Border Grid.Row="3" Background="{DynamicResource PanelBg}"
+                    <Border Grid.Row="3" Name="pnlLoadMore" Background="Transparent" Margin="0,0,0,6" Visibility="Collapsed">
+                        <Button Name="btnLoadMore" Content="⬇ Cargar más resultados"
+                                Height="24"
+                                Style="{StaticResource DatabaseButtonStyle}"
+                                HorizontalAlignment="Stretch"/>
+                    </Border>
+
+                    <Border Grid.Row="4" Background="{DynamicResource PanelBg}"
                             BorderBrush="{DynamicResource BorderBrushColor}" BorderThickness="1"
                             CornerRadius="8" Padding="6">
                         <Grid>
@@ -2065,17 +2410,22 @@ function Show-QueryHistoryWindow {
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0" Orientation="Horizontal">
-                                <Button Name="btnDeleteSelected" Content="🗑️ Eliminar seleccionado"
+                                <Button Name="btnToggleFavorite" Content="★ Favorito"
+                                        Height="26"
+                                        Style="{StaticResource FavoriteButtonStyle}"
+                                        Margin="0,0,4,0"
+                                        ToolTip="Marcar o desmarcar las consultas seleccionadas como favoritas"/>
+                                <Button Name="btnDeleteSelected" Content="🗑️ Eliminar seleccionadas"
                                         Height="26"
                                         Style="{StaticResource DangerButtonStyle}"
                                         Margin="0,0,4,0"/>
-                                <Button Name="btnClearAll" Content="🗑️ ELiminar Todo"
-                                        Height="26"
-                                        Style="{StaticResource DangerButtonStyle}"/>
                                 <Button Name="btnRemoveDuplicates" Content="🔄 Eliminar duplicadas"
                                         Height="26"
                                         Style="{StaticResource DangerButtonStyle}"
-                                        Margin="4,0,0,0"/>
+                                        Margin="0,0,4,0"/>
+                                <Button Name="btnClearAll" Content="🗑️ Eliminar todo"
+                                        Height="26"
+                                        Style="{StaticResource DangerButtonStyle}"/>
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal">
                                 <Button Name="btnCopy" Content="📋 Copiar Query"
@@ -2145,7 +2495,7 @@ function Show-QueryHistoryWindow {
                                 $dep -is [System.Windows.Controls.Primitives.TextBoxBase] -or
                                 $dep -is [System.Windows.Controls.ComboBox] -or
                                 $dep -is [System.Windows.Controls.DataGrid]) {
-                                return   # deja que el control maneje su click normal
+                                return
                             }
                             $dep = [System.Windows.Media.VisualTreeHelper]::GetParent($dep)
                         }
@@ -2163,63 +2513,220 @@ function Show-QueryHistoryWindow {
         $txtSearch = $controls['txtSearch']
         $lblHistoryCount = $controls['lblHistoryCount']
         $lblSelectedCount = $controls['lblSelectedCount']
+        $cmbFilterServer = $controls['cmbFilterServer']
+        $cmbFilterDatabase = $controls['cmbFilterDatabase']
+        $cmbFilterStatus = $controls['cmbFilterStatus']
+        $cmbFilterPeriod = $controls['cmbFilterPeriod']
+        $chkFilterFavorites = $controls['chkFilterFavorites']
+        $pnlLoadMore = $controls['pnlLoadMore']
+        $btnLoadMore = $controls['btnLoadMore']
         $btnRefresh = $controls['btnRefresh']
         $btnClearSearch = $controls['btnClearSearch']
+        $btnToggleFavorite = $controls['btnToggleFavorite']
         $btnCopy = $controls['btnCopy']
         $btnLoadNew = $controls['btnLoadNew']
         $btnDeleteSelected = $controls['btnDeleteSelected']
         $btnClearAll = $controls['btnClearAll']
+        $btnRemoveDuplicates = $controls['btnRemoveDuplicates']
         $btnClose = $controls['btnClose']
-        $fullHistory = New-Object System.Collections.ArrayList
-        $view = [System.Windows.Data.CollectionViewSource]::GetDefaultView($fullHistory)
-        $dataGrid.ItemsSource = $view
-        $loadHistory = {
+
+        $fullHistory = New-Object System.Collections.ObjectModel.ObservableCollection[object]
+        $dataGrid.ItemsSource = $fullHistory
+
+        $historyState = @{
+            TotalCount    = [int64]0
+            LastId        = [int64]0
+            LastExecuted  = ""
+            IsLoading     = $false
+            SuppressFilter = $false
+        }
+
+        $loadFacets = {
+            $historyState.SuppressFilter = $true
             try {
-                $newHistory = @(Get-QueryHistory -MaxItems 100)
-                $fullHistory.Clear()
-                foreach ($item in $newHistory) {
-                    $fullHistory.Add($item) | Out-Null
+                $prevServer = if ($cmbFilterServer.SelectedIndex -gt 0) { [string]$cmbFilterServer.SelectedItem } else { "" }
+                $prevDb = if ($cmbFilterDatabase.SelectedIndex -gt 0) { [string]$cmbFilterDatabase.SelectedItem } else { "" }
+
+                $cmbFilterServer.Items.Clear()
+                [void]$cmbFilterServer.Items.Add("Todos los servidores")
+                $cmbFilterDatabase.Items.Clear()
+                [void]$cmbFilterDatabase.Items.Add("Todas las bases de datos")
+
+                if (Get-Command Get-QueryHistoryFacets -ErrorAction SilentlyContinue) {
+                    $facets = Get-QueryHistoryFacets
+                    foreach ($s in @($facets.Servers)) { [void]$cmbFilterServer.Items.Add($s) }
+                    foreach ($d in @($facets.Databases)) { [void]$cmbFilterDatabase.Items.Add($d) }
                 }
-                $lblHistoryCount.Text = "$($fullHistory.Count) consultas guardadas"
-                $view.Refresh()
-                Write-DzDebug "`t[DEBUG][Historial] Cargado: $($fullHistory.Count) items"
+
+                if ($prevServer -and $cmbFilterServer.Items.Contains($prevServer)) {
+                    $cmbFilterServer.SelectedItem = $prevServer
+                } else {
+                    $cmbFilterServer.SelectedIndex = 0
+                }
+                if ($prevDb -and $cmbFilterDatabase.Items.Contains($prevDb)) {
+                    $cmbFilterDatabase.SelectedItem = $prevDb
+                } else {
+                    $cmbFilterDatabase.SelectedIndex = 0
+                }
+            } catch {
+                Write-DzDebug "`t[DEBUG][Historial] Error cargando facetas: $_" Yellow
+            } finally {
+                $historyState.SuppressFilter = $false
+            }
+        }.GetNewClosure()
+
+        $getFilterParams = {
+            $searchVal = [string]$txtSearch.Text
+            $serverVal = if ($cmbFilterServer.SelectedIndex -gt 0) { [string]$cmbFilterServer.SelectedItem } else { "" }
+            $dbVal = if ($cmbFilterDatabase.SelectedIndex -gt 0) { [string]$cmbFilterDatabase.SelectedItem } else { "" }
+            $statusVal = if ($cmbFilterStatus.SelectedItem -and $cmbFilterStatus.SelectedItem.Tag) { [string]$cmbFilterStatus.SelectedItem.Tag } else { "All" }
+            $periodTag = if ($cmbFilterPeriod.SelectedItem -and $cmbFilterPeriod.SelectedItem.Tag) { [string]$cmbFilterPeriod.SelectedItem.Tag } else { "All" }
+            $fromDate = $null
+            switch ($periodTag) {
+                "Today" { $fromDate = [datetime]::Today.ToUniversalTime() }
+                "7d"    { $fromDate = [datetime]::UtcNow.AddDays(-7) }
+                "30d"   { $fromDate = [datetime]::UtcNow.AddDays(-30) }
+            }
+            $favOnly = ($chkFilterFavorites.IsChecked -eq $true)
+            return @{
+                Search        = $searchVal
+                Server        = $serverVal
+                Database      = $dbVal
+                Status        = $statusVal
+                From          = $fromDate
+                FavoritesOnly = $favOnly
+            }
+        }.GetNewClosure()
+
+        $loadHistory = {
+            param([bool]$Append = $false)
+            if ($historyState.IsLoading) { return }
+            $historyState.IsLoading = $true
+            try {
+                $fp = & $getFilterParams
+                $pageSize = 200
+                if (Get-Command Get-DzSetting -ErrorAction SilentlyContinue) {
+                    $parsedSize = 0
+                    if ([int]::TryParse((Get-DzSetting -Section 'history' -Key 'page_size' -Default '200'), [ref]$parsedSize) -and $parsedSize -gt 0) {
+                        $pageSize = $parsedSize
+                    }
+                }
+
+                if (-not $Append) {
+                    $fullHistory.Clear()
+                    $historyState.LastId = 0
+                    $historyState.LastExecuted = ""
+                    if (Get-Command Get-QueryHistoryCount -ErrorAction SilentlyContinue) {
+                        $historyState.TotalCount = Get-QueryHistoryCount -Search $fp.Search -Server $fp.Server -Database $fp.Database -Status $fp.Status -From $fp.From -FavoritesOnly:$fp.FavoritesOnly
+                    } else {
+                        $historyState.TotalCount = 0
+                    }
+                }
+
+                $rows = @(Get-QueryHistory -PageSize $pageSize -Search $fp.Search -Server $fp.Server -Database $fp.Database -Status $fp.Status -From $fp.From -FavoritesOnly:$fp.FavoritesOnly -AfterExecutedAt $historyState.LastExecuted -AfterId $historyState.LastId)
+                foreach ($item in $rows) {
+                    $fullHistory.Add($item)
+                }
+                if ($rows.Count -gt 0) {
+                    $last = $rows[$rows.Count - 1]
+                    $historyState.LastId = [int64]$last.Id
+                    $historyState.LastExecuted = [string]$last.ExecutedAtUtc
+                }
+                if ($historyState.TotalCount -lt $fullHistory.Count) {
+                    $historyState.TotalCount = $fullHistory.Count
+                }
+
+                $lblHistoryCount.Text = "Mostrando $($fullHistory.Count) de $($historyState.TotalCount) consultas"
+                $hasMore = ($fullHistory.Count -lt $historyState.TotalCount) -and ($rows.Count -gt 0)
+                if ($pnlLoadMore) {
+                    $pnlLoadMore.Visibility = if ($hasMore) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
+                }
+                if ($btnLoadMore) {
+                    $remaining = $historyState.TotalCount - $fullHistory.Count
+                    $btnLoadMore.Content = "⬇ Cargar más ($remaining restantes)"
+                }
+                Write-DzDebug "`t[DEBUG][Historial] Cargado: $($fullHistory.Count) / $($historyState.TotalCount) items"
             } catch {
                 Write-DzDebug "`t[DEBUG][Historial] Error cargando: $_" Red
+            } finally {
+                $historyState.IsLoading = $false
             }
         }.GetNewClosure()
-        $filterHistory = {
-            param([string]$searchText)
-            $search = if ([string]::IsNullOrWhiteSpace($searchText)) { $null } else { $searchText.ToLowerInvariant() }
-            $view.Filter = {
-                param($item)
-                if (-not $search) { return $true }
-                $query = ($item.FullQuery  | ForEach-Object { "$_" }).ToLowerInvariant()
-                $preview = ($item.Preview    | ForEach-Object { "$_" }).ToLowerInvariant()
-                $database = ($item.Database   | ForEach-Object { "$_" }).ToLowerInvariant()
-                $server = ($item.Server     | ForEach-Object { "$_" }).ToLowerInvariant()
-                return ($query.Contains($search) -or
-                    $preview.Contains($search) -or
-                    $database.Contains($search) -or
-                    $server.Contains($search))
-            }
-            $view.Refresh()
-        }.GetNewClosure()
+
+        $searchDebounceTimer = New-Object System.Windows.Threading.DispatcherTimer
+        $searchDebounceTimer.Interval = [TimeSpan]::FromMilliseconds(300)
+        $searchDebounceTimer.Add_Tick({
+                $searchDebounceTimer.Stop()
+                & $loadHistory $false
+            }.GetNewClosure())
+
         $updateSelectionCount = {
             try {
                 $count = @($dataGrid.SelectedItems).Count
                 $lblSelectedCount.Text = "$count seleccionada$(if ($count -ne 1) { 's' } else { '' })"
             } catch {}
         }.GetNewClosure()
+
         $dataGrid.Add_SelectionChanged({ & $updateSelectionCount }.GetNewClosure())
-        $txtSearch.Add_TextChanged({ & $filterHistory -searchText $txtSearch.Text }.GetNewClosure())
-        $btnClearSearch.Add_Click({
-                Write-DzDebug "`t[DEBUG][Historial] Limpiar búsqueda"
-                $txtSearch.Text = ""
-            })
-        $btnRefresh.Add_Click({
-                & $loadHistory
-                $txtSearch.Text = ""
+        $txtSearch.Add_TextChanged({
+                $searchDebounceTimer.Stop()
+                $searchDebounceTimer.Start()
             }.GetNewClosure())
+
+        $onFilterChanged = {
+            if ($historyState.SuppressFilter) { return }
+            & $loadHistory $false
+        }.GetNewClosure()
+        $cmbFilterServer.Add_SelectionChanged($onFilterChanged)
+        $cmbFilterDatabase.Add_SelectionChanged($onFilterChanged)
+        $cmbFilterStatus.Add_SelectionChanged($onFilterChanged)
+        $cmbFilterPeriod.Add_SelectionChanged($onFilterChanged)
+        $chkFilterFavorites.Add_Checked($onFilterChanged)
+        $chkFilterFavorites.Add_Unchecked($onFilterChanged)
+
+        $btnClearSearch.Add_Click({
+                $searchDebounceTimer.Stop()
+                $txtSearch.Text = ""
+                & $loadHistory $false
+            }.GetNewClosure())
+        $btnRefresh.Add_Click({
+                $searchDebounceTimer.Stop()
+                & $loadFacets
+                & $loadHistory $false
+            }.GetNewClosure())
+        if ($btnLoadMore) {
+            $btnLoadMore.Add_Click({ & $loadHistory $true }.GetNewClosure())
+        }
+
+        if ($btnToggleFavorite) {
+            $btnToggleFavorite.Add_Click({
+                    try {
+                        $selectedItems = @($dataGrid.SelectedItems)
+                        if ($selectedItems.Count -eq 0) {
+                            Ui-Warn "Selecciona una o más consultas para marcar como favoritas." "Atención" $window
+                            return
+                        }
+                        if (-not (Get-Command Set-QueryFavorite -ErrorAction SilentlyContinue)) { return }
+                        $targetFav = @($selectedItems | Where-Object { -not $_.IsFavorite }).Count -gt 0
+                        foreach ($item in $selectedItems) {
+                            if ($item.Id -gt 0) {
+                                if (Set-QueryFavorite -Id $item.Id -IsFavorite $targetFav) {
+                                    $item.IsFavorite = $targetFav
+                                    $item.FavoriteIcon = if ($targetFav) { "★" } else { "☆" }
+                                }
+                            }
+                        }
+                        if ($chkFilterFavorites.IsChecked -eq $true -and -not $targetFav) {
+                            & $loadHistory $false
+                        } else {
+                            $dataGrid.Items.Refresh()
+                        }
+                    } catch {
+                        Ui-Error "Error actualizando favoritos:`n$($_.Exception.Message)" "Error" $window
+                    }
+                }.GetNewClosure())
+        }
+
         $btnCopy.Add_Click({
                 try {
                     $selected = $dataGrid.SelectedItem
@@ -2233,12 +2740,12 @@ function Show-QueryHistoryWindow {
                         [System.Windows.Clipboard]::SetText($selected.FullQuery)
                     }
                     Write-Host "`n✓ Query copiado al portapapeles" -ForegroundColor Green
-                    Write-Host "  Query: $($selected.FullQuery)" -ForegroundColor DarkGray
                 } catch {
                     Write-Host "`n✗ Error copiando query: $_" -ForegroundColor Red
                     Ui-Error "Error copiando query: $($_.Exception.Message)" "Error" $window
                 }
             }.GetNewClosure())
+
         $btnLoadNew.Add_Click({
                 try {
                     $selected = $dataGrid.SelectedItem
@@ -2263,6 +2770,7 @@ function Show-QueryHistoryWindow {
                     Ui-Error "Error cargando query: $($_.Exception.Message)" "Error" $window
                 }
             }.GetNewClosure())
+
         $btnDeleteSelected.Add_Click({
                 try {
                     $selectedItems = @($dataGrid.SelectedItems)
@@ -2273,13 +2781,11 @@ function Show-QueryHistoryWindow {
                     $confirm = Ui-Confirm "¿Estás seguro de eliminar $($selectedItems.Count) consulta$(if ($selectedItems.Count -ne 1) { 's' } else { '' }) del historial?" "Confirmar eliminación" $window
                     if (-not $confirm) { return }
                     if (Remove-QueriesFromHistory -Items $selectedItems) {
-                        & $loadHistory
-                        Write-Host "`n✓ $($selectedItems.Count) consulta$(if ($selectedItems.Count -ne 1) { 's eliminadas' } else { ' eliminada' })" -ForegroundColor Green
-                        & $filterHistory -searchText $txtSearch.Text
+                        & $loadFacets
+                        & $loadHistory $false
                         $dataGrid.UnselectAll()
-                        if ($updateSelectionCount -is [scriptblock]) {
-                            & $updateSelectionCount
-                        }
+                        & $updateSelectionCount
+                        Write-Host "`n✓ $($selectedItems.Count) consulta$(if ($selectedItems.Count -ne 1) { 's eliminadas' } else { ' eliminada' })" -ForegroundColor Green
                     } else {
                         Ui-Error "Error eliminando queries del historial" "Error" $window
                     }
@@ -2288,184 +2794,73 @@ function Show-QueryHistoryWindow {
                     Ui-Error "Error: $($_.Exception.Message)" "Error" $window
                 }
             }.GetNewClosure())
+
         $btnClearAll.Add_Click({
-                $confirm = Ui-Confirm "¿Estás seguro de limpiar TODO el historial de queries?" "Confirmar" $window
-                if ($confirm) {
-                    if (Clear-QueryHistory) {
-                        Write-Host "`n✓ Historial limpiado completamente" -ForegroundColor Green
-                        & $loadHistory
-                    } else {
-                        Ui-Error "Error limpiando historial" "Error" $window
+                try {
+                    $favCount = 0
+                    if (Get-Command Get-QueryHistoryCount -ErrorAction SilentlyContinue) {
+                        $favCount = Get-QueryHistoryCount -FavoritesOnly
                     }
+                    if ($favCount -gt 0) {
+                        $choice = Show-WpfMessageBoxSafe -Message "Tienes $favCount consulta(s) marcada(s) como favoritas.`n`nSí: Eliminar todo EXCEPTO favoritas`nNo: Eliminar TODO el historial (incluidas favoritas)`nCancelar: Abortar" -Title "Limpiar historial" -Buttons "YesNoCancel" -Icon "Question" -Owner $window
+                        if ($choice -eq [System.Windows.MessageBoxResult]::Cancel -or $choice -eq [System.Windows.MessageBoxResult]::None) { return }
+                        $keepFavs = ($choice -eq [System.Windows.MessageBoxResult]::Yes)
+                        if (Clear-QueryHistory -KeepFavorites:$keepFavs) {
+                            & $loadFacets
+                            & $loadHistory $false
+                            Write-Host "`n✓ Historial limpiado" -ForegroundColor Green
+                        } else {
+                            Ui-Error "Error limpiando historial" "Error" $window
+                        }
+                    } else {
+                        $confirm = Ui-Confirm "¿Estás seguro de limpiar TODO el historial de queries?" "Confirmar" $window
+                        if ($confirm) {
+                            if (Clear-QueryHistory) {
+                                & $loadFacets
+                                & $loadHistory $false
+                                Write-Host "`n✓ Historial limpiado completamente" -ForegroundColor Green
+                            } else {
+                                Ui-Error "Error limpiando historial" "Error" $window
+                            }
+                        }
+                    }
+                } catch {
+                    Ui-Error "Error limpiando historial: $($_.Exception.Message)" "Error" $window
                 }
             }.GetNewClosure())
-        $btnRemoveDuplicates = $controls['btnRemoveDuplicates']
+
         $btnRemoveDuplicates.Add_Click({
                 try {
-                    $confirm = Ui-Confirm "¿Buscar y eliminar queries duplicadas del historial?`n`nSe conservará la más reciente de cada query." "Confirmar" $window
+                    $confirm = Ui-Confirm "¿Buscar y eliminar queries duplicadas del historial?`n`nSe conservará la ejecución más reciente de cada query y todas las favoritas." "Confirmar" $window
                     if (-not $confirm) { return }
 
-                    $historyPath = $script:QueriesConfigPath
-                    if (-not $historyPath) {
-                        $historyPath = "C:\Temp\dztools\Queries.ini"
+                    if (Get-Command Remove-QueryHistoryDuplicates -ErrorAction SilentlyContinue) {
+                        $deleted = Remove-QueryHistoryDuplicates
+                        if ($deleted -eq 0) {
+                            Ui-Info "No se encontraron queries duplicadas." "Información" $window
+                            return
+                        }
+                        & $loadFacets
+                        & $loadHistory $false
+                        Ui-Info "Limpieza completada exitosamente.`n`n• Queries duplicadas eliminadas: $deleted" "Éxito" $window
+                    } else {
+                        Ui-Warn "La eliminación de duplicadas requiere el almacenamiento SQLite activo." "Modo legado" $window
                     }
-
-                    if (-not (Test-Path -LiteralPath $historyPath)) {
-                        Ui-Warn "No se encontró el archivo de historial en:`n$historyPath" "Atención" $window
-                        return
-                    }
-
-                    Write-Host "`n🔍 Buscando queries duplicadas..." -ForegroundColor Cyan
-
-                    $content = Get-Content -LiteralPath $historyPath -Encoding UTF8 -ErrorAction Stop
-                    $uniqueLines = New-Object System.Collections.Generic.List[string]
-                    $uniqueQueries = [System.Collections.Generic.HashSet[string]]::new()
-                    $inHistorySection = $false
-                    $duplicatesCount = 0
-                    $keptCount = 0
-                    $errorCount = 0
-
-                    $historyLines = New-Object System.Collections.Generic.List[string]
-
-                    foreach ($line in $content) {
-                        $trimmed = $line.Trim()
-
-                        if ($trimmed -eq "[QueriesHistory]") {
-                            $inHistorySection = $true
-                            continue
-                        }
-                        if ($trimmed -match '^\[') {
-                            $inHistorySection = $false
-                            continue
-                        }
-
-                        if ($inHistorySection -and -not ($trimmed -match '^\s*;') -and -not [string]::IsNullOrWhiteSpace($trimmed)) {
-                            $historyLines.Add($line)
-                        }
-                    }
-
-                    for ($i = $historyLines.Count - 1; $i -ge 0; $i--) {
-                        $line = $historyLines[$i]
-                        $trimmed = $line.Trim()
-                        $parts = $trimmed -split '\|'
-
-                        $queryBase64 = ""
-                        $isValid = $false
-
-                        if ($parts.Count -eq 6) {
-                            $queryBase64 = $parts[5]
-                            $isValid = $true
-                        } elseif ($parts.Count -ge 7) {
-                            $queryBase64 = $parts[6]
-                            $isValid = $true
-                        }
-
-                        if ($isValid -and -not [string]::IsNullOrWhiteSpace($queryBase64)) {
-                            try {
-                                $queryBytes = [Convert]::FromBase64String($queryBase64)
-                                $fullQuery = [System.Text.Encoding]::UTF8.GetString($queryBytes)
-                                $normalizedQuery = ($fullQuery -replace '\s+', ' ').Trim().ToLowerInvariant()
-
-                                if ($uniqueQueries.Contains($normalizedQuery)) {
-                                    $duplicatesCount++
-                                    Write-DzDebug "`t[DEBUG] Duplicado: $($parts[4].Substring(0, [Math]::Min(50, $parts[4].Length)))" Yellow
-                                } else {
-                                    $uniqueQueries.Add($normalizedQuery) | Out-Null
-                                    $uniqueLines.Insert(0, $line)
-                                    $keptCount++
-                                }
-                            } catch {
-                                $uniqueLines.Insert(0, $line)
-                                $errorCount++
-                                Write-DzDebug "`t[DEBUG] Línea con error mantenida: $_" Yellow
-                            }
-                        } else {
-                            $uniqueLines.Insert(0, $line)
-                            $errorCount++
-                        }
-                    }
-
-                    if ($duplicatesCount -eq 0) {
-                        $msg = "No se encontraron queries duplicadas"
-                        if ($errorCount -gt 0) {
-                            $msg += "`n`n⚠️ Se encontraron $errorCount líneas con formato antiguo o con errores"
-                        }
-                        Ui-Info $msg "Información" $window
-                        Write-Host "✓ No hay duplicados" -ForegroundColor Green
-                        if ($errorCount -gt 0) {
-                            Write-Host "  ⚠️ $errorCount líneas con errores mantenidas" -ForegroundColor Yellow
-                        }
-                        return
-                    }
-
-                    $finalLines = New-Object System.Collections.Generic.List[string]
-                    $inHistorySection = $false
-
-                    foreach ($line in $content) {
-                        $trimmed = $line.Trim()
-
-                        if ($trimmed -eq "[QueriesHistory]") {
-                            $finalLines.Add($line)
-                            $inHistorySection = $true
-                            continue
-                        }
-
-                        if ($trimmed -match '^\[') {
-                            if ($inHistorySection) {
-                                foreach ($histLine in $uniqueLines) {
-                                    $finalLines.Add($histLine)
-                                }
-                            }
-                            $inHistorySection = $false
-                            $finalLines.Add($line)
-                            continue
-                        }
-
-                        if (-not $inHistorySection) {
-                            $finalLines.Add($line)
-                        } elseif ($trimmed -match '^\s*;') {
-                            $finalLines.Add($line)
-                        }
-                    }
-
-                    if ($inHistorySection) {
-                        foreach ($histLine in $uniqueLines) {
-                            $finalLines.Add($histLine)
-                        }
-                    }
-
-                    Set-Content -LiteralPath $historyPath -Value $finalLines -Encoding UTF8 -Force
-
-                    Write-Host "`n✓ Limpieza completada:" -ForegroundColor Green
-                    Write-Host "  • Queries únicas conservadas: $keptCount" -ForegroundColor Cyan
-                    Write-Host "  • Queries duplicadas eliminadas: $duplicatesCount" -ForegroundColor Yellow
-                    if ($errorCount -gt 0) {
-                        Write-Host "  • Líneas con errores mantenidas: $errorCount" -ForegroundColor Yellow
-                    }
-
-                    & $loadHistory
-                    & $filterHistory -searchText $txtSearch.Text
-
-                    $msg = "Limpieza completada exitosamente`n`n• Conservadas: $keptCount queries únicas`n• Eliminadas: $duplicatesCount queries duplicadas"
-                    if ($errorCount -gt 0) {
-                        $msg += "`n• Líneas con errores: $errorCount (mantenidas)"
-                    }
-                    Ui-Info $msg "Éxito" $window
-
                 } catch {
                     Write-Host "`n✗ Error eliminando duplicados: $_" -ForegroundColor Red
-                    Write-DzDebug "`t[DEBUG] Error completo: $($_.Exception.Message)" Red
                     Ui-Error "Error eliminando duplicados:`n$($_.Exception.Message)" "Error" $window
                 }
             }.GetNewClosure())
 
         $btnClose.Add_Click({ $window.Close() })
+        $window.Add_Closed({ try { $searchDebounceTimer.Stop() } catch {} }.GetNewClosure())
         $dataGrid.Add_MouseDoubleClick({
                 if ($dataGrid.SelectedItem) {
                     $btnLoadNew.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent)))
                 }
             })
-        & $loadHistory
+        & $loadFacets
+        & $loadHistory $false
         $null = $window.ShowDialog()
     } catch {
         Write-Host "`n✗ Error mostrando ventana de historial: $_" -ForegroundColor Red
@@ -2640,10 +3035,10 @@ function New-SqlEditor {
 Export-ModuleMember -Function @(
     'Initialize-QueriesConfig', 'Add-QueryToHistory', 'Save-DbUiContext', 'Get-QueryHistory',
     'Clear-QueryHistory', 'Remove-QueriesFromHistory', 'Save-OpenQueryTabs', 'Restore-OpenQueryTabs',
-    'Show-QueryHistoryWindow', 'Execute-QueryUiSafe', 'Export-ResultsUiSafe', 'New-QueryTab',
+    'Show-QueryHistoryWindow', 'Execute-QueryUiSafe', 'Export-ResultsUiSafe', 'New-QueryTab', 'Open-SqlFileInTab',
     'Set-QueryTabsDatabase', 'Close-OtherQueryTabs', 'Get-ActiveQueryTab', 'Get-ActiveQueryRichTextBox',
     'Set-QueryTextInActiveTab', 'Insert-TextIntoActiveQuery', 'Update-QueryTabHeader',
     'Close-QueryTab', 'Get-SqlEditorPaths', 'Import-AvalonEditAssembly',
     'Get-SqlEditorHighlighting', 'New-SqlEditor', 'Set-SqlEditorText', 'Get-SqlEditorText',
-    'Clear-SqlEditorText', 'Insert-SqlEditorText', 'Get-SqlEditorSelectedText', 'Show-QueryHistoryWindow', 'Show-FindReplacePanel'
+    'Clear-SqlEditorText', 'Insert-SqlEditorText', 'Get-SqlEditorSelectedText', 'Show-FindReplacePanel'
 )

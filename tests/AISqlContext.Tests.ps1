@@ -1,4 +1,4 @@
-$modulePath = Join-Path $PSScriptRoot "..\src\modules\AISqlContext.psm1"
+﻿$modulePath = Join-Path $PSScriptRoot "..\src\modules\AISqlContext.psm1"
 Import-Module $modulePath -Force
 
 Describe "AISqlContext" {

@@ -1096,8 +1096,14 @@ ALTER DATABASE [$safeNew] SET MULTI_USER;
 "@
             $result = Invoke-SqlQuery -Server $server -Database "master" -Query $query -Credential $credential
             if (-not $result.Success) {
+                if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                    Write-DzAuditEvent -EventType 'DB_RENAME' -Target "$server/$dbName" -Status 'ERROR' -Details @{ new_name = $newName; error = $result.ErrorMessage }
+                }
                 Ui-Error "Error al renombrar la base de datos:`n`n$($result.ErrorMessage)" $global:MainWindow
                 return
+            }
+            if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                Write-DzAuditEvent -EventType 'DB_RENAME' -Target "$server/$dbName" -Status 'OK' -Details @{ new_name = $newName }
             }
             Refresh-SqlTreeView -TreeView $global:tvDatabases -Server $server
         })
@@ -1139,13 +1145,22 @@ ALTER DATABASE [$safeNew] SET MULTI_USER;
             $confirm = Ui-Confirm "Se pondrá la base '$dbName' en modo ONLINE. ¿Deseas continuar?" "Cambiar estado" $global:MainWindow
             if (-not $confirm) {
                 Write-DzDebug "`t[DEBUG][TreeView] SET ONLINE cancelado por usuario"
+                if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                    Write-DzAuditEvent -EventType 'DB_STATE_CHANGE' -Target "$server/$dbName" -Status 'CANCELLED' -Details @{ target_state = 'ONLINE' }
+                }
                 return
             }
             $query = "ALTER DATABASE [$safeName] SET ONLINE"
             $result = Invoke-SqlQuery -Server $server -Database "master" -Query $query -Credential $credential
             if (-not $result.Success) {
+                if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                    Write-DzAuditEvent -EventType 'DB_STATE_CHANGE' -Target "$server/$dbName" -Status 'ERROR' -Details @{ target_state = 'ONLINE'; error = $result.ErrorMessage }
+                }
                 Ui-Error "No se pudo poner ONLINE la base:`n`n$($result.ErrorMessage)" $global:MainWindow
                 return
+            }
+            if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                Write-DzAuditEvent -EventType 'DB_STATE_CHANGE' -Target "$server/$dbName" -Status 'OK' -Details @{ target_state = 'ONLINE' }
             }
             Ui-Info "La base '$dbName' quedó ONLINE." "Estado actualizado" $global:MainWindow
             Refresh-SqlTreeView -TreeView $global:tvDatabases -Server $server
@@ -1170,13 +1185,22 @@ ALTER DATABASE [$safeNew] SET MULTI_USER;
             $confirm = Ui-Confirm "Se pondrá la base '$dbName' en modo OFFLINE (con ROLLBACK IMMEDIATE). ¿Deseas continuar?" "Cambiar estado" $global:MainWindow
             if (-not $confirm) {
                 Write-DzDebug "`t[DEBUG][TreeView] SET OFFLINE cancelado por usuario"
+                if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                    Write-DzAuditEvent -EventType 'DB_STATE_CHANGE' -Target "$server/$dbName" -Status 'CANCELLED' -Details @{ target_state = 'OFFLINE' }
+                }
                 return
             }
             $query = "ALTER DATABASE [$safeName] SET OFFLINE WITH ROLLBACK IMMEDIATE"
             $result = Invoke-SqlQuery -Server $server -Database "master" -Query $query -Credential $credential
             if (-not $result.Success) {
+                if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                    Write-DzAuditEvent -EventType 'DB_STATE_CHANGE' -Target "$server/$dbName" -Status 'ERROR' -Details @{ target_state = 'OFFLINE'; error = $result.ErrorMessage }
+                }
                 Ui-Error "No se pudo poner OFFLINE la base:`n`n$($result.ErrorMessage)" $global:MainWindow
                 return
+            }
+            if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                Write-DzAuditEvent -EventType 'DB_STATE_CHANGE' -Target "$server/$dbName" -Status 'OK' -Details @{ target_state = 'OFFLINE' }
             }
             Ui-Info "La base '$dbName' quedó OFFLINE." "Estado actualizado" $global:MainWindow
             Refresh-SqlTreeView -TreeView $global:tvDatabases -Server $server
@@ -1201,13 +1225,22 @@ ALTER DATABASE [$safeNew] SET MULTI_USER;
             $confirm = Ui-Confirm "Se pondrá la base '$dbName' en modo READ_ONLY. ¿Deseas continuar?" "Cambiar estado" $global:MainWindow
             if (-not $confirm) {
                 Write-DzDebug "`t[DEBUG][TreeView] SET READ_ONLY cancelado por usuario"
+                if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                    Write-DzAuditEvent -EventType 'DB_STATE_CHANGE' -Target "$server/$dbName" -Status 'CANCELLED' -Details @{ target_state = 'READ_ONLY' }
+                }
                 return
             }
             $query = "ALTER DATABASE [$safeName] SET READ_ONLY WITH NO_WAIT"
             $result = Invoke-SqlQuery -Server $server -Database "master" -Query $query -Credential $credential
             if (-not $result.Success) {
+                if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                    Write-DzAuditEvent -EventType 'DB_STATE_CHANGE' -Target "$server/$dbName" -Status 'ERROR' -Details @{ target_state = 'READ_ONLY'; error = $result.ErrorMessage }
+                }
                 Ui-Error "No se pudo poner READ_ONLY la base:`n`n$($result.ErrorMessage)" $global:MainWindow
                 return
+            }
+            if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                Write-DzAuditEvent -EventType 'DB_STATE_CHANGE' -Target "$server/$dbName" -Status 'OK' -Details @{ target_state = 'READ_ONLY' }
             }
             Ui-Info "La base '$dbName' quedó READ_ONLY." "Estado actualizado" $global:MainWindow
             Refresh-SqlTreeView -TreeView $global:tvDatabases -Server $server
@@ -1232,13 +1265,22 @@ ALTER DATABASE [$safeNew] SET MULTI_USER;
             $confirm = Ui-Confirm "Se pondrá la base '$dbName' en modo READ_WRITE. ¿Deseas continuar?" "Cambiar estado" $global:MainWindow
             if (-not $confirm) {
                 Write-DzDebug "`t[DEBUG][TreeView] SET READ_WRITE cancelado por usuario"
+                if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                    Write-DzAuditEvent -EventType 'DB_STATE_CHANGE' -Target "$server/$dbName" -Status 'CANCELLED' -Details @{ target_state = 'READ_WRITE' }
+                }
                 return
             }
             $query = "ALTER DATABASE [$safeName] SET READ_WRITE WITH ROLLBACK IMMEDIATE"
             $result = Invoke-SqlQuery -Server $server -Database "master" -Query $query -Credential $credential
             if (-not $result.Success) {
+                if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                    Write-DzAuditEvent -EventType 'DB_STATE_CHANGE' -Target "$server/$dbName" -Status 'ERROR' -Details @{ target_state = 'READ_WRITE'; error = $result.ErrorMessage }
+                }
                 Ui-Error "No se pudo poner READ_WRITE la base:`n`n$($result.ErrorMessage)" $global:MainWindow
                 return
+            }
+            if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                Write-DzAuditEvent -EventType 'DB_STATE_CHANGE' -Target "$server/$dbName" -Status 'OK' -Details @{ target_state = 'READ_WRITE' }
             }
             Ui-Info "La base '$dbName' quedó READ_WRITE." "Estado actualizado" $global:MainWindow
             Refresh-SqlTreeView -TreeView $global:tvDatabases -Server $server
@@ -1398,8 +1440,14 @@ function Add-ServerContextMenu {
             $query = "CREATE DATABASE [$safeName]"
             $result = Invoke-SqlQuery -Server $server -Database "master" -Query $query -Credential $credential
             if (-not $result.Success) {
+                if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                    Write-DzAuditEvent -EventType 'DB_CREATE' -Target "$server/$dbName" -Status 'ERROR' -Details @{ error = $result.ErrorMessage }
+                }
                 Ui-Error "Error al crear la base de datos:`n`n$($result.ErrorMessage)" $global:MainWindow
                 return
+            }
+            if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                Write-DzAuditEvent -EventType 'DB_CREATE' -Target "$server/$dbName" -Status 'OK'
             }
             Refresh-SqlTreeServerNode -ServerNode $node
         })
@@ -1814,6 +1862,9 @@ function Show-DeleteDatabaseDialog {
                     $result1 = Invoke-SqlQuery -Server $Server -Database "master" -Query $closeQuery -Credential $Credential
                     if (-not $result1.Success) {
                         Write-DzDebug "`t[DEBUG][DeleteDB] Error cerrando conexiones: $($result1.ErrorMessage)"
+                        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                            Write-DzAuditEvent -EventType 'DB_DELETE' -Target "$Server/$Database" -Status 'ERROR' -Details @{ step = 'single_user'; error = $result1.ErrorMessage }
+                        }
                         Ui-Error "Error al cerrar conexiones existentes:`n`n$($result1.ErrorMessage)" "Error" $window
                         return
                     }
@@ -1824,10 +1875,16 @@ function Show-DeleteDatabaseDialog {
                 $result2 = Invoke-SqlQuery -Server $Server -Database "master" -Query $dropQuery -Credential $Credential
                 if (-not $result2.Success) {
                     Write-DzDebug "`t[DEBUG][DeleteDB] Error eliminando DB: $($result2.ErrorMessage)"
+                    if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                        Write-DzAuditEvent -EventType 'DB_DELETE' -Target "$Server/$Database" -Status 'ERROR' -Details @{ step = 'drop_database'; error = $result2.ErrorMessage }
+                    }
                     Ui-Error "Error al eliminar la base de datos:`n`n$($result2.ErrorMessage)" "Error" $window
                     return
                 }
                 Write-DzDebug "`t[DEBUG][DeleteDB] Base de datos eliminada OK"
+                if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                    Write-DzAuditEvent -EventType 'DB_DELETE' -Target "$Server/$Database" -Status 'OK' -Details @{ delete_backup_history = $deleteBackupHistory; close_connections = $closeConnections }
+                }
                 if ($deleteBackupHistory) {
                     Write-DzDebug "`t[DEBUG][DeleteDB] Paso 3: Eliminando historial de backup"
                     $historyQuery = "EXEC msdb.dbo.sp_delete_database_backuphistory @database_name = N'$escapedDb'"

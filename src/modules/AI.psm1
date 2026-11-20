@@ -1,7 +1,7 @@
-#requires -Version 5.0
+﻿#requires -Version 5.0
 
 $script:DzAiApiKey = $null
-$script:DzAiModel = "gemini-2.5-flash"
+$script:DzAiModel = "auto"
 $script:DzAiCurrentRunspace = $null
 $script:DzAiCurrentPowerShell = $null
 $script:DzAiCurrentAsync = $null
@@ -10,7 +10,7 @@ $script:DzAiCurrentJob = $null
 $script:DzAiCurrentResult = $null
 $script:DzAiCurrentStartedAt = $null
 $script:DzAiCurrentLastWaitLogAt = [DateTime]::MinValue
-$script:DzAiCurrentTimeoutSeconds = 100
+$script:DzAiCurrentTimeoutSeconds = 260
 
 function Write-DzAiDebug {
     param(
@@ -125,13 +125,72 @@ function Set-DzAiStatus {
     } catch {}
 }
 
+function Initialize-DzAiOutputEditor {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$Window)
+
+    $global:brdDzAiOutput = $Window.FindName("brdDzAiOutput")
+    if (-not $global:brdDzAiOutput) { return }
+    if (-not (Get-Command Get-SqlEditorPaths -ErrorAction SilentlyContinue) -or
+        -not (Get-Command Import-AvalonEditAssembly -ErrorAction SilentlyContinue) -or
+        -not (Get-Command Get-SqlEditorHighlighting -ErrorAction SilentlyContinue)) {
+        Write-DzAiDebug "AvalonEdit no disponible para salida IA; se usara TextBox." ([System.ConsoleColor]::Yellow)
+        return
+    }
+
+    try {
+        $paths = Get-SqlEditorPaths
+        Import-AvalonEditAssembly -AssemblyPath $paths.AssemblyPath
+
+        $brushConverter = New-Object System.Windows.Media.BrushConverter
+        $editor = New-Object ICSharpCode.AvalonEdit.TextEditor
+        $editor.IsReadOnly = $true
+        $editor.ShowLineNumbers = $false
+        $editor.WordWrap = $true
+        $editor.FontFamily = "Consolas"
+        $editor.FontSize = 11
+        $editor.Padding = [System.Windows.Thickness]::new(8)
+        $editor.HorizontalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
+        $editor.VerticalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
+        $editor.Background = $brushConverter.ConvertFromString("#F5F5F5")
+        $editor.Foreground = $brushConverter.ConvertFromString("#000000")
+        $editor.TextArea.SelectionBrush = $brushConverter.ConvertFromString("#264F78")
+        $editor.TextArea.SelectionForeground = $brushConverter.ConvertFromString("#FFFFFF")
+        $editor.TextArea.TextView.CurrentLineBackground = $brushConverter.ConvertFromString("#EDECEC")
+        $editor.TextArea.TextView.CurrentLineBorder = $null
+        $editor.Options.HighlightCurrentLine = $false
+        $editor.Options.EnableHyperlinks = $false
+        $editor.Options.EnableEmailHyperlinks = $false
+        $editor.Options.EnableTextDragDrop = $false
+        $editor.SyntaxHighlighting = Get-SqlEditorHighlighting -HighlightingPath $paths.HighlightingPath
+
+        $global:brdDzAiOutput.Child = $editor
+        $global:txtDzAiOutputEditor = $editor
+        Write-DzAiDebug "Salida IA inicializada con AvalonEdit y resaltado SQL." ([System.ConsoleColor]::Green)
+    } catch {
+        $global:txtDzAiOutputEditor = $null
+        Write-DzAiDebug ("No se pudo inicializar AvalonEdit para IA: {0}" -f $_.Exception.Message) ([System.ConsoleColor]::Yellow)
+    }
+}
+
 function Set-DzAiOutput {
     param([string]$Text)
-    $len = if ($null -eq $Text) { 0 } else { ([string]$Text).Length }
+    $outputText = if ($null -eq $Text) { "" } else { [string]$Text }
+    $len = $outputText.Length
     Write-DzAiDebug "Actualizando salida IA. Caracteres=$len" ([System.ConsoleColor]::DarkGray)
     try {
+        if ($global:txtDzAiOutputEditor) {
+            $global:txtDzAiOutputEditor.Text = $outputText
+            try { $global:txtDzAiOutputEditor.CaretOffset = 0 } catch {}
+            try {
+                $global:txtDzAiOutputEditor.ScrollToLine(1)
+            } catch {
+                try { $global:txtDzAiOutputEditor.ScrollToHome() } catch {}
+            }
+            return
+        }
         if ($global:txtDzAiOutput) {
-            $global:txtDzAiOutput.Text = $Text
+            $global:txtDzAiOutput.Text = $outputText
             $global:txtDzAiOutput.SelectionStart = 0
             $global:txtDzAiOutput.SelectionLength = 0
             $global:txtDzAiOutput.ScrollToHome()
@@ -225,71 +284,102 @@ function Get-DzAiActiveQueryText {
     }
 }
 
+function Get-DzAiFlashModelCandidates {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$ApiKey)
+
+    $fallback = @('models/gemini-3.8-flash', 'models/gemini-3.6-flash', 'models/gemini-3.5-flash')
+    $available = New-Object System.Collections.Generic.List[object]
+    $pageToken = ""
+    try {
+        do {
+            $uri = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000"
+            if ($pageToken) { $uri += "&pageToken=$([uri]::EscapeDataString($pageToken))" }
+            $page = Invoke-RestMethod -Uri $uri -Method Get -Headers @{ 'x-goog-api-key' = $ApiKey } -TimeoutSec 30 -ErrorAction Stop
+            foreach ($model in @($page.models)) {
+                if ($model.name -notmatch '^models/gemini-(\d+)(?:\.(\d+))?-flash$') { continue }
+                if ($model.name -eq 'models/gemini-3.7-flash') { continue }
+                if ($model.supportedGenerationMethods -notcontains 'generateContent') { continue }
+                $minor = if ($Matches[2]) { [int]$Matches[2] } else { 0 }
+                $version = [version]("{0}.{1}" -f $Matches[1], $minor)
+                if ($version -lt [version]'3.5') { continue }
+                $available.Add([pscustomobject]@{ Name = [string]$model.name; Version = $version })
+            }
+            $pageToken = [string]$page.nextPageToken
+        } while ($pageToken)
+    } catch {
+        Write-DzAiDebug ("No se pudo listar modelos; usando respaldo fijo: {0}" -f $_.Exception.Message) ([System.ConsoleColor]::Yellow)
+        return $fallback
+    }
+
+    $candidates = @($available | Sort-Object Version -Descending | Select-Object -ExpandProperty Name -Unique -First 3)
+    if ($candidates.Count -eq 0) { throw "No hay modelos Flash estables con generateContent disponibles para esta API key." }
+    return $candidates
+}
+
 function Invoke-DzGeminiGenerateContent {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][string]$Prompt,
         [string]$SystemInstruction = "",
-        [string]$Model = "gemini-2.5-flash",
+        [string]$Model = "auto",
         [Parameter(Mandatory = $true)][string]$ApiKey,
         [double]$Temperature = 0.2,
-        [int]$MaxOutputTokens = 2048
+        [int]$MaxOutputTokens = 4096,
+        [switch]$IncludeMetadata
     )
 
     if ([string]::IsNullOrWhiteSpace($ApiKey)) { throw "No se ha capturado la API key de Gemini." }
-    if ([string]::IsNullOrWhiteSpace($Model)) { $Model = "gemini-2.5-flash" }
+    if ([string]::IsNullOrWhiteSpace($Model)) { $Model = "auto" }
     if ($MaxOutputTokens -lt 128) { $MaxOutputTokens = 128 }
 
-    $modelName = if ($Model -match '^models/') { $Model } else { "models/$Model" }
-    $uri = "https://generativelanguage.googleapis.com/v1beta/$modelName`:generateContent?key=$ApiKey"
-    Write-DzAiDebug "Invoke-DzGeminiGenerateContent modelo=$modelName uri=v1beta/...:generateContent" ([System.ConsoleColor]::Cyan)
-    $bodyObject = @{
-        contents = @(
-            @{
-                parts = @(@{ text = $Prompt })
-            }
-        )
-        generationConfig = @{
-            temperature = $Temperature
-            maxOutputTokens = $MaxOutputTokens
-        }
+    $models = if ($Model -eq 'auto') {
+        @(Get-DzAiFlashModelCandidates -ApiKey $ApiKey)
+    } else {
+        @(if ($Model -match '^models/') { $Model } else { "models/$Model" })
     }
-    if ($modelName -match 'gemini-2\.5') {
-        $bodyObject.generationConfig.thinkingConfig = @{ thinkingBudget = 0 }
-    }
-    if (-not [string]::IsNullOrWhiteSpace($SystemInstruction)) {
-        $bodyObject.systemInstruction = @{
-            parts = @(@{ text = $SystemInstruction })
-        }
-    }
+    $attemptErrors = New-Object System.Collections.Generic.List[string]
 
-    $body = $bodyObject | ConvertTo-Json -Depth 12
-    $headers = @{
-        "Content-Type" = "application/json"
-    }
-
-    try {
-        Write-DzAiDebug ("Enviando request Gemini. PromptChars={0} BodyChars={1}" -f $Prompt.Length, $body.Length) ([System.ConsoleColor]::Cyan)
-        $response = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $body -ContentType "application/json" -TimeoutSec 75
-        Write-DzAiDebug "Respuesta HTTP recibida de Gemini." ([System.ConsoleColor]::Green)
-        $text = $response.candidates[0].content.parts[0].text
-        Write-DzAiDebug ("Texto Gemini recibido. Caracteres={0} FinishReason={1}" -f $text.Length, $response.candidates[0].finishReason) ([System.ConsoleColor]::Green)
-        if ([string]::IsNullOrWhiteSpace($text)) { throw "Gemini no devolvio texto." }
-        return $text
-    } catch {
-        $message = $_.Exception.Message
-        if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $message = "$message $($_.ErrorDetails.Message)" }
+    foreach ($modelName in $models) {
+        $generationConfig = @{ maxOutputTokens = $MaxOutputTokens }
+        if ($modelName -notmatch '^models/gemini-[3-9]' -or $PSBoundParameters.ContainsKey('Temperature')) {
+            $generationConfig.temperature = $Temperature
+        }
+        if ($modelName -match '^models/gemini-3\.[56]-flash$') {
+            $generationConfig.thinkingConfig = @{ thinkingLevel = 'minimal' }
+        } elseif ($modelName -match '^models/gemini-2\.5-flash$') {
+            $generationConfig.thinkingConfig = @{ thinkingBudget = 0 }
+        }
+        $bodyObject = @{
+            contents = @(@{ parts = @(@{ text = $Prompt }) })
+            generationConfig = $generationConfig
+        }
+        if (-not [string]::IsNullOrWhiteSpace($SystemInstruction)) {
+            $bodyObject.systemInstruction = @{ parts = @(@{ text = $SystemInstruction }) }
+        }
+        $body = $bodyObject | ConvertTo-Json -Depth 12 -Compress
+        $uri = "https://generativelanguage.googleapis.com/v1beta/$($modelName):generateContent"
+        Write-DzAiDebug "Consultando $modelName" ([System.ConsoleColor]::Cyan)
         try {
-            $stream = $_.Exception.Response.GetResponseStream()
-            if ($stream) {
-                $reader = New-Object System.IO.StreamReader($stream)
-                $apiError = $reader.ReadToEnd()
-                if (-not [string]::IsNullOrWhiteSpace($apiError)) { $message = $apiError }
-            }
-        } catch {}
-        Write-DzAiDebug "Error Gemini: $message" ([System.ConsoleColor]::Red)
-        throw "Error llamando a Gemini: $message"
+            $response = Invoke-RestMethod -Method Post -Uri $uri -Headers @{ 'x-goog-api-key' = $ApiKey } -Body $body -ContentType 'application/json' -TimeoutSec 75 -ErrorAction Stop
+            $parts = @($response.candidates[0].content.parts | Where-Object { -not $_.thought -and $_.text } | ForEach-Object { [string]$_.text })
+            $text = $parts -join ''
+            if ([string]::IsNullOrWhiteSpace($text)) { throw "Gemini no devolvio texto." }
+            if ($IncludeMetadata) { return [pscustomobject]@{ Text = $text; Model = $modelName } }
+            return $text
+        } catch {
+            $message = $_.Exception.Message
+            if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $message = "$message $($_.ErrorDetails.Message)" }
+            $statusCode = 0
+            try { $statusCode = [int]$_.Exception.Response.StatusCode } catch {}
+            $attemptErrors.Add(("{0}: {1}" -f $modelName, $message))
+            $retryable = $statusCode -in @(404, 429, 500, 502, 503, 504) -or
+                $message -match 'No devolvio texto|timeout|timed out|temporarily unavailable|overloaded|RESOURCE_EXHAUSTED|UNAVAILABLE|\b(?:404|429|500|502|503|504)\b'
+            if (-not $retryable) { throw "Error llamando a Gemini: $message" }
+            Write-DzAiDebug ("Modelo no disponible: {0}. Probando el siguiente." -f $modelName) ([System.ConsoleColor]::Yellow)
+        }
     }
+    throw ("Ningun modelo Flash respondio. {0}" -f ($attemptErrors -join ' | '))
 }
 
 function Start-DzAiRequest {
@@ -319,7 +409,7 @@ function Start-DzAiRequest {
     Set-DzAiOutput $WorkingText
 
     $worker = {
-        param($Prompt, $SystemInstruction, $Model, $ApiKey)
+        param($Prompt, $SystemInstruction, $Model, $ApiKey, $ModulePath)
 
         function Send-WorkerLog {
             param([string]$Message)
@@ -327,84 +417,15 @@ function Start-DzAiRequest {
         }
 
         try {
-            Send-WorkerLog "Worker iniciado."
             [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            $fallback = if ($Model -match '^models/') { $Model } else { "models/$Model" }
-            $preferredModels = @(
-                'models/gemini-2.5-flash',
-                'models/gemini-2.0-flash',
-                'models/gemini-flash-latest',
-                'models/gemini-1.5-flash-latest'
-            )
-
-            $modelName = $fallback
-            try {
-                Send-WorkerLog "Consultando modelos disponibles..."
-                $modelsUri = "https://generativelanguage.googleapis.com/v1beta/models?key=$ApiKey"
-                $modelsResponse = Invoke-RestMethod -Uri $modelsUri -Method Get -TimeoutSec 30
-                $generateModels = @($modelsResponse.models | Where-Object { $_.supportedGenerationMethods -contains 'generateContent' })
-                foreach ($preferred in $preferredModels) {
-                    $match = $generateModels | Where-Object { $_.name -eq $preferred } | Select-Object -First 1
-                    if ($null -ne $match) {
-                        $modelName = $match.name
-                        break
-                    }
-                }
-                if ($modelName -eq $fallback -and $generateModels.Count -gt 0) {
-                    $modelName = $generateModels[0].name
-                }
-                Send-WorkerLog "Modelo seleccionado: $modelName"
-            } catch {
-                $msg = $_.Exception.Message
-                if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $msg = "$msg $($_.ErrorDetails.Message)" }
-                Send-WorkerLog "No se pudieron listar modelos. Usando fallback $fallback. Error: $msg"
-                $modelName = $fallback
-            }
-
-            $uri = "https://generativelanguage.googleapis.com/v1beta/$($modelName):generateContent?key=$ApiKey"
-            Send-WorkerLog "Preparando request generateContent. Modelo=$modelName PromptChars=$($Prompt.Length)"
-            $bodyObject = @{
-                contents = @(
-                    @{
-                        parts = @(@{ text = $Prompt })
-                    }
-                )
-                generationConfig = @{
-                    temperature = 0.2
-                    maxOutputTokens = 900
-                }
-            }
-            if ($modelName -match 'gemini-2\.5') {
-                $bodyObject.generationConfig.thinkingConfig = @{ thinkingBudget = 0 }
-            }
-            if (-not [string]::IsNullOrWhiteSpace($SystemInstruction)) {
-                $bodyObject.systemInstruction = @{ parts = @(@{ text = $SystemInstruction }) }
-            }
-            $body = $bodyObject | ConvertTo-Json -Depth 12 -Compress
-            $headers = @{
-                "Content-Type" = "application/json"
-            }
-            Send-WorkerLog "Enviando request a Gemini. BodyChars=$($body.Length)"
-            $response = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -Body $body -ContentType "application/json" -TimeoutSec 90
-            Send-WorkerLog "Respuesta recibida de Gemini."
-            if ($response.candidates -and $response.candidates[0].finishReason) {
-                Send-WorkerLog "FinishReason=$($response.candidates[0].finishReason)"
-            }
-            $text = $response.candidates[0].content.parts[0].text
-            if ([string]::IsNullOrWhiteSpace($text)) { throw "Gemini no devolvio texto." }
-            Send-WorkerLog "Texto recibido. Caracteres=$($text.Length)"
-            Write-Output @{ type = 'result'; Ok = $true; Text = $text }
+            Import-Module -Name $ModulePath -Force -DisableNameChecking -ErrorAction Stop
+            Send-WorkerLog "Buscando el mejor modelo Flash disponible..."
+            $answer = Invoke-DzGeminiGenerateContent -Prompt $Prompt -SystemInstruction $SystemInstruction -Model $Model -ApiKey $ApiKey -MaxOutputTokens 4096 -IncludeMetadata
+            Send-WorkerLog "Modelo que respondio: $($answer.Model)"
+            Write-Output @{ type = 'result'; Ok = $true; Text = $answer.Text; Model = $answer.Model }
         } catch {
             $message = $_.Exception.Message
             if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $message = "$message $($_.ErrorDetails.Message)" }
-            try {
-                $stream = $_.Exception.Response.GetResponseStream()
-                if ($stream) {
-                    $reader = New-Object System.IO.StreamReader($stream)
-                    $apiError = $reader.ReadToEnd()
-                    if (-not [string]::IsNullOrWhiteSpace($apiError)) { $message = $apiError }
-                }
-            } catch {}
             Send-WorkerLog "ERROR: $message"
             Write-Output @{ type = 'result'; Ok = $false; Error = $message }
         }
@@ -417,7 +438,8 @@ function Start-DzAiRequest {
         $Prompt,
         $SystemInstruction,
         $script:DzAiModel,
-        $script:DzAiApiKey
+        $script:DzAiApiKey,
+        (Join-Path $PSScriptRoot 'AI.psm1')
     )
     $script:DzAiCurrentJob = $job
     $startedAt = $script:DzAiCurrentStartedAt
@@ -517,7 +539,7 @@ function Start-DzAiRequest {
                     & $OnSuccess ([string]$result.Text)
                 } else {
                     Set-DzAiOutput ([string]$result.Text)
-                    Set-DzAiStatus "Gemini listo"
+                    Set-DzAiStatus ("Gemini listo ({0})" -f $result.Model)
                 }
             } else {
                 $err = if ($result -and $result.Error) { [string]$result.Error } else { "Error desconocido llamando a Gemini." }
@@ -542,6 +564,28 @@ function Start-DzAiRequest {
     Write-DzAiDebug "Timer IA iniciado." ([System.ConsoleColor]::DarkGray)
 }
 
+function Get-DzAiConnectionContextText {
+    $server = ""
+    $database = ""
+    try {
+        if ($global:txtServer) { $server = ([string]$global:txtServer.Text).Trim() }
+    } catch {}
+    try {
+        if ($global:cmbDatabases) {
+            $database = ([string]$global:cmbDatabases.Text).Trim()
+            if ([string]::IsNullOrWhiteSpace($database) -and $global:cmbDatabases.SelectedItem) {
+                $database = ([string]$global:cmbDatabases.SelectedItem).Trim()
+            }
+        }
+    } catch {}
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($server)) { $lines.Add("Servidor SQL activo: $server") }
+    if (-not [string]::IsNullOrWhiteSpace($database)) { $lines.Add("Base de datos activa: $database") }
+    $lines.Add("Aplicacion: dztools, herramienta de soporte tecnico para SQL Server y entornos NationalSoft.")
+    return ($lines -join "`n")
+}
+
 function Invoke-DzAiExplainQuery {
     Write-DzAiDebug "Boton 'Explica el Query' presionado." ([System.ConsoleColor]::Cyan)
     $query = Get-DzAiActiveQueryText
@@ -551,15 +595,33 @@ function Invoke-DzAiExplainQuery {
         return
     }
 
-    $system = "Eres un asistente experto en SQL Server y soporte tecnico. Responde en espanol claro, practico y breve. Maximo 8 lineas. No uses introducciones largas, no repitas el query completo, no ejecutes SQL ni inventes objetos que no aparecen en el texto."
+    $context = Get-DzAiConnectionContextText
+    $system = @"
+Eres un asistente experto en SQL Server para soporte tecnico.
+Responde en espanol claro, practico y accionable para alguien que revisa una consulta en dztools.
+No uses Markdown decorativo, no uses negritas con **, no repitas el query completo y no inventes tablas, columnas ni relaciones que no aparezcan en el texto.
+Si das una recomendacion, debe ser concreta y relacionada con rendimiento, seguridad, claridad, indices, filtros o riesgo de modificacion de datos.
+"@
     $prompt = @"
 Explica el siguiente query SQL para un tecnico o administrador.
 
+Contexto disponible:
+$context
+
 Formato:
-- 3 a 6 bullets cortos.
-- Menciona tablas/filtros/joins importantes si aparecen.
-- Si modifica datos, marca el riesgo.
-- Si aplica, da 1 revision concreta.
+Resumen:
+- 1 o 2 bullets con que hace el query y que datos espera devolver o modificar.
+
+Desglose:
+- Explica FROM/JOIN/WHERE/GROUP BY/ORDER BY/TOP si aparecen.
+- Menciona tablas, alias, filtros, joins y columnas importantes.
+
+Riesgos o detalles:
+- Si hay SELECT *, TOP sin ORDER BY, NOLOCK, funciones en filtros, conversiones, subconsultas costosas o cambios de datos, explica el impacto.
+- Si no hay riesgos claros, dilo en una linea breve.
+
+Recomendacion:
+- Da 1 recomendacion concreta. Puede ser de rendimiento, legibilidad, seguridad o validacion antes de ejecutar.
 
 QUERY:
 $query
@@ -589,7 +651,7 @@ function Invoke-DzAiExplainMessages {
         Write-DzAiDebug "No hay query activo para adjuntar a mensajes." ([System.ConsoleColor]::DarkGray)
     }
 
-    $system = "Eres un asistente experto en SQL Server y soporte tecnico. Explica mensajes de ejecucion en espanol claro y accionable. Maximo 8 lineas. No repitas los mensajes completos ni des pasos genericos de SSMS salvo que sean necesarios. Usa el query activo para diagnosticar si viene incluido. No inventes detalles fuera del texto."
+    $system = "Eres un asistente experto en SQL Server y soporte tecnico. Explica mensajes de ejecucion en espanol claro y accionable. Maximo 8 lineas. No uses Markdown decorativo ni negritas con **. No repitas los mensajes completos ni des pasos genericos de SSMS salvo que sean necesarios. Usa el query activo para diagnosticar si viene incluido. No inventes detalles fuera del texto."
     $prompt = @"
 Explica los siguientes mensajes generados por la ejecucion de un query SQL.
 
@@ -701,7 +763,7 @@ function Invoke-DzAiGenerateSql {
 
 function Initialize-DzAiTab {
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)][System.Windows.Window]$Window)
+    param([Parameter(Mandatory = $true)]$Window)
 
     try {
         Write-DzAiDebug "Inicializando pestaña IA." ([System.ConsoleColor]::Cyan)
@@ -715,9 +777,12 @@ function Initialize-DzAiTab {
         $global:btnDzAiGenerateSql = $Window.FindName("btnDzAiGenerateSql")
         $global:txtDzAiQuestion = $Window.FindName("txtDzAiQuestion")
         $global:btnDzAiLogout = $Window.FindName("btnDzAiLogout")
+        $global:brdDzAiOutput = $Window.FindName("brdDzAiOutput")
         $global:txtDzAiOutput = $Window.FindName("txtDzAiOutput")
         $global:lblDzAiStatus = $Window.FindName("lblDzAiStatus")
         $global:tabDzAi = $Window.FindName("tabDzAi")
+
+        Initialize-DzAiOutputEditor -Window $Window
 
         if ($global:tcResults) { [void](Move-DzAiTabLast -TabControl $global:tcResults) }
         Write-DzAiDebug "Controles IA localizados y pestaña movida al final." ([System.ConsoleColor]::DarkGray)
