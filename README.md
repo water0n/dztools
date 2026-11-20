@@ -253,7 +253,7 @@ GitHub Actions ejecuta el flujo definido en `.github/workflows/ci.yml`:
 - **Migracion automatica**: al detectar `dztools.ini` y/o `Queries.ini`, se importan en una transaccion atomica hacia `dztools.db` y se renombran a `*.migrated.bak` (con las contrasenas SQL redactadas en `dztools.ini.migrated.bak`).
 - **Cifrado de credenciales**: las contrasenas SQL se almacenan cifradas por usuario de Windows mediante **DPAPI** (`CurrentUser` + entropia por servidor). Si cambia el usuario o equipo y no pueden descifrarse, se marca `needs_reentry` sin bloquear el arranque.
 - **Historial de queries y pestanas**: sin limite de 100 registros; paginacion *keyset* en SQL, busqueda FTS5 trigrama (con respaldo `LIKE`), filtros por servidor/BD/estado/periodo, registro de `duration_ms`, favoritos, eliminacion de duplicados conservando favoritos, y restauracion de pestanas con archivo, base y autoguardado.
-- **Bitacora de auditoria (`audit_log`)**: registra acciones relevantes de interfaz (con filtro anti-ruido que omite ventanas de sistema y botones como Cerrar/Cancelar) y eventos enriquecidos para operaciones sensibles (redaccion automatica de secretos; sin visor integrado por ahora).
+- **Bitacora de auditoria (`audit_log`)**: registra acciones relevantes de interfaz (con filtro anti-ruido que omite ventanas de sistema y botones como Cerrar/Cancelar) y eventos enriquecidos para operaciones sensibles (redaccion automatica de secretos). Cuando el modo **DEBUG** esta activo, habilita la pestana **Bitacora** (despues de *SSMS portable*) para consultar `audit_log` en modo solo lectura con filtros por columnas, facetas, rango de fechas y paginacion.
 - **Modo fallback**: si falta `sqlite3.dll` (por ejemplo, primer arranque sin red o PowerShell x86), opera en modo INI legible y encola eventos de auditoria en `C:\Temp\dztools\audit-pending.jsonl` para sincronizarlos cuando SQLite vuelva a estar disponible.
 - **Respaldos y rollback**: genera copias rotativas semanales con `VACUUM INTO` en `C:\Temp\dztools\backups\db\`. Para volver temporalmente a INIs, cierra `dztools`, respalda/mueve `dztools.db` y restaura `dztools.ini.migrated.bak` y `Queries.ini.migrated.bak` eliminando el sufijo `.migrated.bak`.
 
@@ -270,7 +270,7 @@ GitHub Actions ejecuta el flujo definido en `.github/workflows/ci.yml`:
 
 - Mejorar cobertura de pruebas automatizadas.
 - Documentar capturas de pantalla por modulo.
-- Agregar visor opcional y exportacion de bitacora (`audit_log`).
+- Agregar exportacion avanzada de bitacora (`audit_log`).
 - Refinar empaquetado y publicacion de releases.
 - Incorporar exportacion avanzada de resultados.
 - Fortalecer validaciones antes de operaciones destructivas.

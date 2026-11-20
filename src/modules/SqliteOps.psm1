@@ -368,6 +368,28 @@ function Get-DzSqliteRuntimePath {
     Join-Path $RuntimeDir $script:DzSqliteDllName
 }
 
+function Get-DzFileSha256 {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath
+    )
+
+    if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
+        throw "Archivo no encontrado para calcular SHA256: $FilePath"
+    }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::Open($FilePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        $hashBytes = $sha.ComputeHash($stream)
+        return ([BitConverter]::ToString($hashBytes)).Replace('-', '').ToUpperInvariant()
+    } finally {
+        if ($stream) { $stream.Dispose() }
+        if ($sha) { $sha.Dispose() }
+    }
+}
+
 function Write-DzSqliteDllHashFile {
     [CmdletBinding()]
     param(
@@ -386,7 +408,7 @@ function Test-DzSqliteDllHash {
 
     if (-not (Test-Path -LiteralPath $DllPath -PathType Leaf)) { return $false }
     try {
-        $actualHash = (Get-FileHash -LiteralPath $DllPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToUpperInvariant()
+        $actualHash = Get-DzFileSha256 -FilePath $DllPath
         if ($actualHash -ne $script:DzSqliteDllSha256) {
             return $false
         }
@@ -423,7 +445,7 @@ function Test-DzSqliteZipHash {
         [string]$ZipPath
     )
 
-    $hash = (Get-FileHash -LiteralPath $ZipPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToUpperInvariant()
+    $hash = Get-DzFileSha256 -FilePath $ZipPath
     if ($hash -ne $script:DzSqliteZipSha256) {
         throw "El hash SHA256 del runtime SQLite no coincide. Esperado: $script:DzSqliteZipSha256. Recibido: $hash"
     }
@@ -460,7 +482,7 @@ function Expand-DzSqliteRuntimeZip {
                 if ($inStream) { $inStream.Dispose() }
             }
             if ($entry.FullName -eq $script:DzSqliteDllName) {
-                $dllHash = (Get-FileHash -LiteralPath $target -Algorithm SHA256 -ErrorAction Stop).Hash.ToUpperInvariant()
+                $dllHash = Get-DzFileSha256 -FilePath $target
                 if ($dllHash -ne $script:DzSqliteDllSha256) {
                     Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
                     throw "El hash SHA256 de sqlite3.dll extraído no coincide. Esperado: $script:DzSqliteDllSha256. Recibido: $dllHash"
@@ -479,7 +501,8 @@ function Save-DzSqliteRuntimeZip {
         [Parameter(Mandatory = $true)]
         [string]$OutFile,
 
-        [System.Windows.Window]$ProgressWindow
+        [AllowNull()]
+        [System.Windows.Window]$ProgressWindow = $null
     )
 
     $tmp = "$OutFile.download"
@@ -488,10 +511,22 @@ function Save-DzSqliteRuntimeZip {
     }
 
     if (Get-Command Download-FileWithProgressWpfStream -ErrorAction SilentlyContinue) {
-        Download-FileWithProgressWpfStream -Url $script:DzSqliteRawUrl -OutFile $tmp -Window $ProgressWindow | Out-Null
+        if ($ProgressWindow) {
+            Download-FileWithProgressWpfStream -Url $script:DzSqliteRawUrl -OutFile $tmp -Window $ProgressWindow | Out-Null
+        } else {
+            Write-Host "  ⏳ Descargando runtime SQLite (sqlite3.dll)..." -ForegroundColor DarkCyan
+            Download-FileWithProgressWpfStream -Url $script:DzSqliteRawUrl -OutFile $tmp | Out-Null
+        }
     } else {
+        Write-Host "  ⏳ Descargando runtime SQLite (sqlite3.dll)..." -ForegroundColor DarkCyan
         try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
-        Invoke-WebRequest -Uri $script:DzSqliteRawUrl -OutFile $tmp -UseBasicParsing -ErrorAction Stop
+        $wc = New-Object System.Net.WebClient
+        try {
+            $wc.Headers.Add("User-Agent", "DzTools-SQLite-Runtime")
+            $wc.DownloadFile($script:DzSqliteRawUrl, $tmp)
+        } finally {
+            $wc.Dispose()
+        }
     }
 
     Test-DzSqliteZipHash -ZipPath $tmp
@@ -501,8 +536,10 @@ function Save-DzSqliteRuntimeZip {
 function Initialize-DzSqliteRuntime {
     [CmdletBinding()]
     param(
-        [System.Windows.Window]$Owner,
-        [System.Windows.Window]$ProgressWindow,
+        [AllowNull()]
+        [System.Windows.Window]$Owner = $null,
+        [AllowNull()]
+        [System.Windows.Window]$ProgressWindow = $null,
         [string]$RuntimeDir = $script:DzSqliteResourceDir,
         [string]$LocalZipPath = "",
         [switch]$NoDownload

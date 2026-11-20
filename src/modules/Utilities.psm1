@@ -876,7 +876,7 @@ function Download-FileWithProgressWpfStream {
     param(
         [Parameter(Mandatory)] [string]$Url,
         [Parameter(Mandatory)] [string]$OutFile,
-        [Parameter(Mandatory)] $Window,
+        [Parameter()] [AllowNull()] $Window = $null,
         [Parameter()] [ScriptBlock]$OnStatus
     )
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}

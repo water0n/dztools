@@ -154,6 +154,33 @@ Describe "DzStorage - Migración de INIs a SQLite, DPAPI, Historial y Bitácora"
             Test-DzSqliteRuntimeAvailable -RuntimeDir $isolatedRt | Should -BeFalse
         }
 
+        It "Descarga e inicializa runtime SQLite al arrancar sin ventana WPF (ProgressWindow nulo)" -Skip:(-not $script:CanRunSqlite) {
+            $freshRt = Join-Path $TestDrive "fresh_client_rt"
+            $freshBase = Join-Path $TestDrive "fresh_client_base"
+            $zipSrc = $script:LocalRuntimeZip
+
+            $cmdInfo = Get-Command Download-FileWithProgressWpfStream
+            $winParam = $cmdInfo.Parameters['Window'].Attributes | Where-Object { $_ -is [System.Management.Automation.ParameterAttribute] } | Select-Object -First 1
+            $winParam.Mandatory | Should -BeFalse
+
+            # Simula primer arranque en equipo cliente limpio: sin ProgressWindow ni LocalRuntimeZipPath
+            InModuleScope SqliteOps -Parameters @{ ZipSrc = $zipSrc; FreshRt = $freshRt; FreshBase = $freshBase } {
+                param($ZipSrc, $FreshRt, $FreshBase)
+                Mock Download-FileWithProgressWpfStream {
+                    param($Url, $OutFile, $Window, $OnStatus)
+                    Copy-Item -LiteralPath $ZipSrc -Destination $OutFile -Force
+                    return $true
+                }
+                $ok = Initialize-DzStorage -BaseDir $FreshBase -RuntimeDir $FreshRt -ForceReinit
+                $ok | Should -BeTrue
+                Should -Invoke Download-FileWithProgressWpfStream -Times 1
+            }
+
+            (Get-DzStorageMode) | Should -Be 'sqlite'
+            Test-Path -LiteralPath (Join-Path $freshRt "sqlite3.dll") -PathType Leaf | Should -BeTrue
+            (Get-Content (Join-Path $script:ModulesPath "SqliteOps.psm1") -Raw) | Should -Not -Match '\bGet-FileHash\b'
+        }
+
         It "Delega settings en Utilities.psm1 con alias desarrollo y dev, y marca needs_reentry ante ciphertext corrupto" -Skip:(-not $script:CanRunSqlite) {
             $baseDir = Join-Path $TestDrive "settings_dpapi"
             Initialize-DzStorage -BaseDir $baseDir -RuntimeDir $script:SharedRuntimeDir -LocalRuntimeZipPath $script:LocalRuntimeZip -ForceReinit | Out-Null
@@ -419,6 +446,73 @@ debug=true
                 try {
                     $ui.Window | Should -Not -BeNullOrEmpty
                     { Set-DzWpfThemeResources -Window $ui.Window -Theme $themeObj } | Should -Not -Throw
+                } finally {
+                    $ui.Window.Close()
+                }
+            }
+        }
+
+        It "Filtra audit_log por columnas, facetas, rango de fechas y carga pestaña Bitacora en XAML Light/Dark" -Skip:(-not $script:CanRunSqlite) {
+            $baseDir = Join-Path $TestDrive "bitacora_tab"
+            Initialize-DzStorage -BaseDir $baseDir -RuntimeDir $script:SharedRuntimeDir -LocalRuntimeZipPath $script:LocalRuntimeZip -ForceReinit | Out-Null
+
+            Write-DzAuditEvent -EventType 'SQL_QUERY' -WindowTitle 'DzTools' -ControlName 'btnExecute' -ActionLabel 'Ejecutar query' -Target 'VentasDB' -Status 'OK' -Details @{ rows = 42 }
+            Write-DzAuditEvent -EventType 'DB_RESTORE' -WindowTitle 'Restaurar' -ControlName 'btnRestore' -ActionLabel 'Restaurar BD' -Target 'CajaDB' -Status 'ERROR' -Details @{ msg = 'Fallo simulado' }
+            Write-DzAuditEvent -EventType 'WIN_USER_CREATE' -WindowTitle 'Usuarios' -ControlName 'btnSaveUser' -ActionLabel 'Crear usuario' -Target 'soporte' -Status 'OK' -Details @{ role = 'Admin' }
+
+            $all = @(Get-DzAuditLog -Limit 10)
+            $all.Count | Should -Be 3
+
+            $byType = @(Get-DzAuditLog -EventType 'DB_RESTORE')
+            $byType.Count | Should -Be 1
+            $byType[0].target | Should -Be 'CajaDB'
+
+            $byStatusAndCtrl = @(Get-DzAuditLog -Status 'ERROR' -ControlName 'Restore')
+            $byStatusAndCtrl.Count | Should -Be 1
+
+            $byActionAndSearch = @(Get-DzAuditLog -ActionLabel 'Ejecutar' -Search '42')
+            $byActionAndSearch.Count | Should -Be 1
+
+            $byToday = @(Get-DzAuditLog -From ([datetime]::Today) -To ([datetime]::Today.AddDays(1).AddMilliseconds(-1)))
+            $byToday.Count | Should -Be 3
+
+            (Get-DzAuditLogCount -Status 'OK') | Should -Be 2
+
+            # Paginación keyset
+            $pageA = @(Get-DzAuditLog -Limit 2)
+            $pageB = @(Get-DzAuditLog -Limit 2 -AfterId $pageA[-1].id)
+            $pageA.Count | Should -Be 2
+            $pageB.Count | Should -Be 1
+            ($pageA[-1].id -gt $pageB[0].id) | Should -BeTrue
+
+            # Facetas por columna
+            $facets = Get-DzAuditLogFacets
+            $facets.TotalCount | Should -Be 3
+            $facets.EventTypes | Should -Contain 'SQL_QUERY'
+            $facets.Statuses | Should -Contain 'ERROR'
+            $facets.WindowTitles | Should -Contain 'Restaurar'
+
+            # Validación XAML de tabBitacora (después de tabProSql, oculta por defecto) en Light y Dark
+            $xamlLight = InModuleScope GUI { Mock Get-DzUiMode { 'light' }; Get-MainWindowXaml -Theme (Get-DzUiTheme) }
+            $xamlDark = InModuleScope GUI { Mock Get-DzUiMode { 'dark' }; Get-MainWindowXaml -Theme (Get-DzUiTheme) }
+            ($xamlLight.IndexOf('Name="tabBitacora"')) | Should -BeGreaterThan ($xamlLight.IndexOf('Name="tabProSql"'))
+
+            foreach ($pair in @(
+                    @{ Xaml = $xamlLight; Theme = (InModuleScope GUI { Mock Get-DzUiMode { 'light' }; Get-DzUiTheme }) },
+                    @{ Xaml = $xamlDark; Theme = (InModuleScope GUI { Mock Get-DzUiMode { 'dark' }; Get-DzUiTheme }) }
+                )) {
+                $ui = New-WpfWindow -Xaml $pair.Xaml -PassThru
+                try {
+                    Set-DzWpfThemeResources -Window $ui.Window -Theme $pair.Theme
+                    $tab = $ui.Controls['tabBitacora']
+                    $tab | Should -Not -BeNullOrEmpty
+                    $tab.Visibility | Should -Be ([System.Windows.Visibility]::Collapsed)
+
+                    $tab.Visibility = [System.Windows.Visibility]::Visible
+                    Initialize-DzBitacoraTab -Window $ui.Window
+                    $ui.Controls['tabControl'].SelectedItem = $tab
+                    $ui.Controls['btnBitacoraQuery'].RaiseEvent((New-Object System.Windows.RoutedEventArgs ([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent)))
+                    $ui.Controls['dgBitacora'].Items.Count | Should -Be 3
                 } finally {
                     $ui.Window.Close()
                 }

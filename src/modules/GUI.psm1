@@ -1962,6 +1962,187 @@ function Get-MainWindowXaml {
                     </StatusBar>
                 </Grid>
             </TabItem>
+            <TabItem Name="tabBitacora" Visibility="Collapsed">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="📜" Margin="0,0,6,0"/>
+                        <TextBlock Text="Bitacora"/>
+                    </StackPanel>
+                </TabItem.Header>
+                <Grid Background="{DynamicResource PanelBg}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="94"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- FILTROS POR COLUMNAS (SOLO CONSULTAS) -->
+                    <Border Grid.Row="0" Margin="8,8,8,4" Padding="10"
+                            BorderBrush="{DynamicResource BorderBrushColor}"
+                            BorderThickness="1" CornerRadius="8"
+                            Background="{DynamicResource ControlBg}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="6"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- Fila 1: columnas categóricas / facetas de BD -->
+                            <Grid Grid.Row="0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="1.2*"/>
+                                    <ColumnDefinition Width="6"/>
+                                    <ColumnDefinition Width="0.9*"/>
+                                    <ColumnDefinition Width="6"/>
+                                    <ColumnDefinition Width="1*"/>
+                                    <ColumnDefinition Width="6"/>
+                                    <ColumnDefinition Width="1*"/>
+                                    <ColumnDefinition Width="6"/>
+                                    <ColumnDefinition Width="1.3*"/>
+                                    <ColumnDefinition Width="6"/>
+                                    <ColumnDefinition Width="1.2*"/>
+                                    <ColumnDefinition Width="6"/>
+                                    <ColumnDefinition Width="0.9*"/>
+                                    <ColumnDefinition Width="6"/>
+                                    <ColumnDefinition Width="0.9*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Tipo (event_type)" FontSize="10" Margin="0,0,0,2"/>
+                                    <ComboBox Name="cmbBitacoraEventType" Height="24" FontSize="11"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Estado (status)" FontSize="10" Margin="0,0,0,2"/>
+                                    <ComboBox Name="cmbBitacoraStatus" Height="24" FontSize="11"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="4">
+                                    <TextBlock Text="Usuario (windows_user)" FontSize="10" Margin="0,0,0,2"/>
+                                    <ComboBox Name="cmbBitacoraUser" Height="24" FontSize="11"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="6">
+                                    <TextBlock Text="Equipo (machine_name)" FontSize="10" Margin="0,0,0,2"/>
+                                    <ComboBox Name="cmbBitacoraMachine" Height="24" FontSize="11"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="8">
+                                    <TextBlock Text="Ventana (window_title)" FontSize="10" Margin="0,0,0,2"/>
+                                    <ComboBox Name="cmbBitacoraWindow" Height="24" FontSize="11"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="10">
+                                    <TextBlock Text="Sesión (session_id)" FontSize="10" Margin="0,0,0,2"/>
+                                    <ComboBox Name="cmbBitacoraSession" Height="24" FontSize="11"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="12">
+                                    <TextBlock Text="Versión (app_version)" FontSize="10" Margin="0,0,0,2"/>
+                                    <ComboBox Name="cmbBitacoraVersion" Height="24" FontSize="11"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="14">
+                                    <TextBlock Text="Admin (is_admin)" FontSize="10" Margin="0,0,0,2"/>
+                                    <ComboBox Name="cmbBitacoraAdmin" Height="24" FontSize="11"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- Fila 2: filtros de texto por columna, fechas y botones de consulta -->
+                            <Grid Grid.Row="2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="1*"/>
+                                    <ColumnDefinition Width="6"/>
+                                    <ColumnDefinition Width="1*"/>
+                                    <ColumnDefinition Width="6"/>
+                                    <ColumnDefinition Width="1*"/>
+                                    <ColumnDefinition Width="6"/>
+                                    <ColumnDefinition Width="1.4*"/>
+                                    <ColumnDefinition Width="6"/>
+                                    <ColumnDefinition Width="115"/>
+                                    <ColumnDefinition Width="6"/>
+                                    <ColumnDefinition Width="115"/>
+                                    <ColumnDefinition Width="6"/>
+                                    <ColumnDefinition Width="75"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Acción (action_label)" FontSize="10" Margin="0,0,0,2"/>
+                                    <TextBox Name="txtBitacoraAction" Height="24" FontSize="11" ToolTip="Contiene en action_label (Enter para consultar)"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Control (control_name)" FontSize="10" Margin="0,0,0,2"/>
+                                    <TextBox Name="txtBitacoraControl" Height="24" FontSize="11" ToolTip="Contiene en control_name (Enter para consultar)"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="4">
+                                    <TextBlock Text="Objetivo (target)" FontSize="10" Margin="0,0,0,2"/>
+                                    <TextBox Name="txtBitacoraTarget" Height="24" FontSize="11" ToolTip="Contiene en target (Enter para consultar)"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="6">
+                                    <TextBlock Text="Detalles / Búsqueda general" FontSize="10" Margin="0,0,0,2"/>
+                                    <TextBox Name="txtBitacoraDetails" Height="24" FontSize="11" ToolTip="Busca palabras en details, ID y demás columnas (Enter para consultar)"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="8">
+                                    <TextBlock Text="Desde (created_at)" FontSize="10" Margin="0,0,0,2"/>
+                                    <DatePicker Name="dpBitacoraFrom" Height="24" FontSize="11"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="10">
+                                    <TextBlock Text="Hasta (created_at)" FontSize="10" Margin="0,0,0,2"/>
+                                    <DatePicker Name="dpBitacoraTo" Height="24" FontSize="11"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="12">
+                                    <TextBlock Text="Límite" FontSize="10" Margin="0,0,0,2"/>
+                                    <ComboBox Name="cmbBitacoraLimit" Height="24" FontSize="11"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="14" Orientation="Horizontal" VerticalAlignment="Bottom">
+                                    <Button Name="btnBitacoraQuery" Tag="DzNoAudit" Content="🔍 Consultar" Height="24" Padding="10,2" Margin="0,0,4,0" Style="{StaticResource DatabaseButtonStyle}" FontSize="11"/>
+                                    <Button Name="btnBitacoraRefresh" Tag="DzNoAudit" Content="↻" Height="24" Width="28" Padding="2" Margin="0,0,4,0" Style="{StaticResource GeneralButtonStyle}" FontSize="11" ToolTip="Recargar listas y volver a consultar"/>
+                                    <Button Name="btnBitacoraClear" Tag="DzNoAudit" Content="🧹" Height="24" Width="28" Padding="2" Style="{StaticResource GeneralButtonStyle}" FontSize="11" ToolTip="Limpiar filtros"/>
+                                </StackPanel>
+                            </Grid>
+                        </Grid>
+                    </Border>
+
+                    <!-- BARRA DE RESUMEN + PAGINACIÓN -->
+                    <Grid Grid.Row="1" Margin="10,2,10,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Name="lblBitacoraSummary" Grid.Column="0" Text="Listo para consultar audit_log (solo lectura)." VerticalAlignment="Center" Foreground="{DynamicResource AccentMuted}" FontSize="11"/>
+                        <Button Name="btnBitacoraMore" Tag="DzNoAudit" Grid.Column="1" Content="⬇ Cargar más" Height="22" Padding="8,2" Style="{StaticResource GeneralButtonStyle}" FontSize="10" Visibility="Collapsed"/>
+                    </Grid>
+
+                    <!-- TABLA DE RESULTADOS -->
+                    <DataGrid Name="dgBitacora" Grid.Row="2" Margin="8,0,8,4"
+                            IsReadOnly="True" AutoGenerateColumns="False"
+                            CanUserAddRows="False" CanUserDeleteRows="False"
+                            SelectionMode="Single" HeadersVisibility="Column"
+                            GridLinesVisibility="Horizontal"
+                            HorizontalScrollBarVisibility="Auto"
+                            VerticalScrollBarVisibility="Auto"
+                            FontSize="11">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="ID" Binding="{Binding id}" Width="60"/>
+                            <DataGridTextColumn Header="Fecha (Local)" Binding="{Binding created_at_local}" Width="140"/>
+                            <DataGridTextColumn Header="Tipo" Binding="{Binding event_type}" Width="145"/>
+                            <DataGridTextColumn Header="Estado" Binding="{Binding status}" Width="75"/>
+                            <DataGridTextColumn Header="Acción" Binding="{Binding action_label}" Width="170"/>
+                            <DataGridTextColumn Header="Objetivo" Binding="{Binding target}" Width="155"/>
+                            <DataGridTextColumn Header="Control" Binding="{Binding control_name}" Width="130"/>
+                            <DataGridTextColumn Header="Ventana" Binding="{Binding window_title}" Width="165"/>
+                            <DataGridTextColumn Header="Detalles" Binding="{Binding details}" Width="260"/>
+                            <DataGridTextColumn Header="Usuario" Binding="{Binding windows_user}" Width="105"/>
+                            <DataGridTextColumn Header="Equipo" Binding="{Binding machine_name}" Width="115"/>
+                            <DataGridTextColumn Header="Admin" Binding="{Binding is_admin_text}" Width="55"/>
+                            <DataGridTextColumn Header="Versión" Binding="{Binding app_version}" Width="125"/>
+                            <DataGridTextColumn Header="Sesión" Binding="{Binding session_id}" Width="210"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <!-- DETALLE DEL REGISTRO SELECCIONADO -->
+                    <TextBox Name="txtBitacoraRowDetail" Grid.Row="3" Margin="8,0,8,8"
+                            IsReadOnly="True" Style="{StaticResource ConsoleTextBoxStyle}"
+                            FontSize="11" Text="Selecciona un registro para ver el detalle completo."/>
+                </Grid>
+            </TabItem>
         </TabControl>
     </Grid>
 </Window>

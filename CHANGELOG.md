@@ -15,6 +15,7 @@ y este proyecto adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.h
 - Historial de queries sin límite de 100 registros con paginación keyset, búsqueda FTS5 trigrama / `LIKE`, filtros, duración (`duration_ms`), favoritos y limpieza de duplicados
 - Persistencia completa de pestañas abiertas (`file_path`, `database_name`, `is_active`) con autoguardado periódico
 - Bitácora `audit_log` con captura global WPF filtrada (sin ruido) y eventos enriquecidos en operaciones sensibles, más cola `audit-pending.jsonl` en modo fallback
+- Pestaña **Bitacora** (visible solo con modo **DEBUG** activado, después de *SSMS portable*) para consulta de `audit_log` con filtros por columnas, facetas, rango de fechas y paginación *keyset* (solo lectura)
 - Migración automática atómica con `.migrated.bak` redactado, recuperación automática ante corrupción y respaldos rotativos con `VACUUM INTO`
 - Suite de pruebas de integración `tests/DzStorage.Tests.ps1`
 - Estructura modular del proyecto

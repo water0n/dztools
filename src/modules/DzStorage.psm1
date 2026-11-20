@@ -30,7 +30,8 @@ $script:DzDefaultExcludedAuditControls = @(
     'btnClose', 'btnCloseX', 'btnCloseFooter', 'btnCerrar',
     'btnCancel', 'btnCancelar', 'btnClearSearch', 'btnSsmsPanelToggle',
     'tabAddQuery', 'BtnFindNext', 'BtnFindPrev', 'btnFindNext', 'btnFindPrev', 'btnCloseSearch',
-    'chkFilterFavorites', 'btnLoadMore'
+    'chkFilterFavorites', 'btnLoadMore',
+    'btnBitacoraQuery', 'btnBitacoraRefresh', 'btnBitacoraClear', 'btnBitacoraMore'
 )
 $script:DzDefaultExcludedAuditLabels = @('×', 'x', 'cerrar', 'cancelar', '▼', '▲', 'ok', 'sí', 'si', 'no')
 $script:DzDefaultSettings = [ordered]@{
@@ -2517,28 +2518,531 @@ function Invoke-DzAuditRetention {
     return [int64]$deleted
 }
 
+function ConvertTo-DzSqlLikePattern {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$Text)
+    $escaped = $Text.Replace('\', '\\').Replace('%', '\%').Replace('_', '\_')
+    return "%$escaped%"
+}
+
+function Build-DzAuditLogWhereClause {
+    [CmdletBinding()]
+    param(
+        [string]$EventType = "",
+        [string]$SessionId = "",
+        [string]$Status = "",
+        [string]$WindowsUser = "",
+        [string]$MachineName = "",
+        [string]$WindowTitle = "",
+        [string]$ControlName = "",
+        [string]$ActionLabel = "",
+        [string]$Target = "",
+        [string]$AppVersion = "",
+        [string]$Search = "",
+        [ValidateSet('All', 'Admin', 'NonAdmin')][string]$AdminFilter = 'All',
+        [AllowNull()][Nullable[datetime]]$From = $null,
+        [AllowNull()][Nullable[datetime]]$To = $null,
+        [int64]$AfterId = 0
+    )
+
+    $clauses = New-Object System.Collections.Generic.List[string]
+    $params = @{}
+
+    if (-not [string]::IsNullOrWhiteSpace($EventType)) {
+        $clauses.Add("event_type = @etype")
+        $params['etype'] = $EventType.Trim()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($SessionId)) {
+        $clauses.Add("session_id = @sid")
+        $params['sid'] = $SessionId.Trim()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Status)) {
+        $clauses.Add("UPPER(COALESCE(status, '')) = UPPER(@status)")
+        $params['status'] = $Status.Trim()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($WindowsUser)) {
+        $clauses.Add("LOWER(windows_user) = LOWER(@wuser)")
+        $params['wuser'] = $WindowsUser.Trim()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($MachineName)) {
+        $clauses.Add("LOWER(machine_name) = LOWER(@mname)")
+        $params['mname'] = $MachineName.Trim()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($WindowTitle)) {
+        $clauses.Add("COALESCE(window_title, '') = @wtitle")
+        $params['wtitle'] = $WindowTitle.Trim()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($AppVersion)) {
+        $clauses.Add("COALESCE(app_version, '') = @appver")
+        $params['appver'] = $AppVersion.Trim()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ControlName)) {
+        $clauses.Add("COALESCE(control_name, '') LIKE @ctrl ESCAPE '\'")
+        $params['ctrl'] = ConvertTo-DzSqlLikePattern -Text $ControlName.Trim()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ActionLabel)) {
+        $clauses.Add("COALESCE(action_label, '') LIKE @act ESCAPE '\'")
+        $params['act'] = ConvertTo-DzSqlLikePattern -Text $ActionLabel.Trim()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Target)) {
+        $clauses.Add("COALESCE(target, '') LIKE @tgt ESCAPE '\'")
+        $params['tgt'] = ConvertTo-DzSqlLikePattern -Text $Target.Trim()
+    }
+    if ($AdminFilter -eq 'Admin') {
+        $clauses.Add("is_admin = 1")
+    } elseif ($AdminFilter -eq 'NonAdmin') {
+        $clauses.Add("is_admin = 0")
+    }
+    if ($null -ne $From) {
+        $clauses.Add("created_at >= @from_utc")
+        $params['from_utc'] = Get-DzUtcTimestamp -DateTime $From
+    }
+    if ($null -ne $To) {
+        $clauses.Add("created_at <= @to_utc")
+        $params['to_utc'] = Get-DzUtcTimestamp -DateTime $To
+    }
+    if ($AfterId -gt 0) {
+        $clauses.Add("id < @after_id")
+        $params['after_id'] = [int64]$AfterId
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Search)) {
+        $tokens = @($Search.Trim() -split '\s+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $idx = 0
+        foreach ($tok in $tokens) {
+            $pName = "q_$idx"
+            $params[$pName] = ConvertTo-DzSqlLikePattern -Text $tok
+            $clauses.Add("(CAST(id AS TEXT) LIKE @$pName ESCAPE '\' OR event_type LIKE @$pName ESCAPE '\' OR COALESCE(action_label,'') LIKE @$pName ESCAPE '\' OR COALESCE(control_name,'') LIKE @$pName ESCAPE '\' OR COALESCE(target,'') LIKE @$pName ESCAPE '\' OR COALESCE(details,'') LIKE @$pName ESCAPE '\' OR COALESCE(window_title,'') LIKE @$pName ESCAPE '\' OR COALESCE(status,'') LIKE @$pName ESCAPE '\' OR windows_user LIKE @$pName ESCAPE '\' OR machine_name LIKE @$pName ESCAPE '\' OR session_id LIKE @$pName ESCAPE '\' OR COALESCE(app_version,'') LIKE @$pName ESCAPE '\')")
+            $idx++
+        }
+    }
+
+    $whereSql = if ($clauses.Count -gt 0) { "WHERE " + ($clauses -join " AND ") } else { "" }
+    return [pscustomobject]@{
+        WhereSql   = $whereSql
+        Parameters = $params
+    }
+}
+
 function Get-DzAuditLog {
     [CmdletBinding()]
     param(
         [int]$Limit = 200,
         [string]$EventType = "",
-        [string]$SessionId = ""
+        [string]$SessionId = "",
+        [string]$Status = "",
+        [string]$WindowsUser = "",
+        [string]$MachineName = "",
+        [string]$WindowTitle = "",
+        [string]$ControlName = "",
+        [string]$ActionLabel = "",
+        [string]$Target = "",
+        [string]$AppVersion = "",
+        [string]$Search = "",
+        [ValidateSet('All', 'Admin', 'NonAdmin')][string]$AdminFilter = 'All',
+        [AllowNull()][Nullable[datetime]]$From = $null,
+        [AllowNull()][Nullable[datetime]]$To = $null,
+        [int64]$AfterId = 0
     )
 
     if ($script:DzStorageMode -ne 'sqlite') { return @() }
-    $clauses = New-Object System.Collections.Generic.List[string]
-    $params = @{ limit_rows = [int64]$Limit }
-    if (-not [string]::IsNullOrWhiteSpace($EventType)) {
-        $clauses.Add("event_type = @etype")
-        $params['etype'] = $EventType
+    $safeLimit = if ($Limit -lt 1) { 200 } elseif ($Limit -gt 5000) { 5000 } else { $Limit }
+    $filter = Build-DzAuditLogWhereClause -EventType $EventType -SessionId $SessionId -Status $Status -WindowsUser $WindowsUser -MachineName $MachineName -WindowTitle $WindowTitle -ControlName $ControlName -ActionLabel $ActionLabel -Target $Target -AppVersion $AppVersion -Search $Search -AdminFilter $AdminFilter -From $From -To $To -AfterId $AfterId
+    $filter.Parameters['limit_rows'] = [int64]$safeLimit
+
+    $rows = @(Invoke-DzDbQuery -Sql "SELECT id, created_at, session_id, event_type, window_title, control_name, action_label, target, details, status, windows_user, machine_name, app_version, is_admin FROM audit_log $($filter.WhereSql) ORDER BY id DESC LIMIT @limit_rows;" -Parameters $filter.Parameters)
+    $list = New-Object System.Collections.Generic.List[object] ($rows.Count)
+    foreach ($row in $rows) {
+        $isAdminVal = ([int64]$row.is_admin -ne 0)
+        $list.Add([pscustomobject]@{
+                id               = [int64]$row.id
+                created_at       = [string]$row.created_at
+                created_at_local = ConvertFrom-DzUtcTimestampToLocalText -UtcText ([string]$row.created_at)
+                session_id       = [string]$row.session_id
+                event_type       = [string]$row.event_type
+                window_title     = if ($null -ne $row.window_title) { [string]$row.window_title } else { "" }
+                control_name     = if ($null -ne $row.control_name) { [string]$row.control_name } else { "" }
+                action_label     = if ($null -ne $row.action_label) { [string]$row.action_label } else { "" }
+                target           = if ($null -ne $row.target) { [string]$row.target } else { "" }
+                details          = if ($null -ne $row.details) { [string]$row.details } else { "" }
+                status           = if ($null -ne $row.status) { [string]$row.status } else { "" }
+                windows_user     = [string]$row.windows_user
+                machine_name     = [string]$row.machine_name
+                app_version      = if ($null -ne $row.app_version) { [string]$row.app_version } else { "" }
+                is_admin         = [int64]$row.is_admin
+                is_admin_text    = if ($isAdminVal) { "Sí" } else { "No" }
+            })
     }
-    if (-not [string]::IsNullOrWhiteSpace($SessionId)) {
-        $clauses.Add("session_id = @sid")
-        $params['sid'] = $SessionId
+    return $list.ToArray()
+}
+
+function Get-DzAuditLogCount {
+    [CmdletBinding()]
+    param(
+        [string]$EventType = "",
+        [string]$SessionId = "",
+        [string]$Status = "",
+        [string]$WindowsUser = "",
+        [string]$MachineName = "",
+        [string]$WindowTitle = "",
+        [string]$ControlName = "",
+        [string]$ActionLabel = "",
+        [string]$Target = "",
+        [string]$AppVersion = "",
+        [string]$Search = "",
+        [ValidateSet('All', 'Admin', 'NonAdmin')][string]$AdminFilter = 'All',
+        [AllowNull()][Nullable[datetime]]$From = $null,
+        [AllowNull()][Nullable[datetime]]$To = $null
+    )
+
+    if ($script:DzStorageMode -ne 'sqlite') { return [int64]0 }
+    $filter = Build-DzAuditLogWhereClause -EventType $EventType -SessionId $SessionId -Status $Status -WindowsUser $WindowsUser -MachineName $MachineName -WindowTitle $WindowTitle -ControlName $ControlName -ActionLabel $ActionLabel -Target $Target -AppVersion $AppVersion -Search $Search -AdminFilter $AdminFilter -From $From -To $To
+    return [int64](Invoke-DzDbScalar -Sql "SELECT COUNT(*) FROM audit_log $($filter.WhereSql);" -Parameters $filter.Parameters)
+}
+
+function Get-DzAuditLogFacets {
+    [CmdletBinding()]
+    param()
+
+    if ($script:DzStorageMode -ne 'sqlite') {
+        return [pscustomobject]@{
+            EventTypes   = @()
+            Statuses     = @()
+            WindowsUsers = @()
+            MachineNames = @()
+            WindowTitles = @()
+            SessionIds   = @()
+            AppVersions  = @()
+            TotalCount   = [int64]0
+        }
     }
-    $whereSql = if ($clauses.Count -gt 0) { "WHERE " + ($clauses -join " AND ") } else { "" }
-    $rows = Invoke-DzDbQuery -Sql "SELECT id, created_at, session_id, event_type, window_title, control_name, action_label, target, details, status, windows_user, machine_name, app_version, is_admin FROM audit_log $whereSql ORDER BY id DESC LIMIT @limit_rows;" -Parameters $params
-    return $rows
+
+    $etRows = @(Invoke-DzDbQuery -Sql "SELECT DISTINCT event_type FROM audit_log WHERE event_type IS NOT NULL AND event_type <> '' ORDER BY event_type COLLATE NOCASE;")
+    $stRows = @(Invoke-DzDbQuery -Sql "SELECT DISTINCT status FROM audit_log WHERE status IS NOT NULL AND status <> '' ORDER BY status COLLATE NOCASE;")
+    $usRows = @(Invoke-DzDbQuery -Sql "SELECT DISTINCT windows_user FROM audit_log WHERE windows_user IS NOT NULL AND windows_user <> '' ORDER BY windows_user COLLATE NOCASE;")
+    $mcRows = @(Invoke-DzDbQuery -Sql "SELECT DISTINCT machine_name FROM audit_log WHERE machine_name IS NOT NULL AND machine_name <> '' ORDER BY machine_name COLLATE NOCASE;")
+    $wtRows = @(Invoke-DzDbQuery -Sql "SELECT DISTINCT window_title FROM audit_log WHERE window_title IS NOT NULL AND window_title <> '' ORDER BY window_title COLLATE NOCASE;")
+    $ssRows = @(Invoke-DzDbQuery -Sql "SELECT session_id FROM audit_log WHERE session_id IS NOT NULL AND session_id <> '' GROUP BY session_id ORDER BY MAX(id) DESC LIMIT 100;")
+    $avRows = @(Invoke-DzDbQuery -Sql "SELECT DISTINCT app_version FROM audit_log WHERE app_version IS NOT NULL AND app_version <> '' ORDER BY app_version COLLATE NOCASE;")
+    $total = [int64](Invoke-DzDbScalar -Sql "SELECT COUNT(*) FROM audit_log;")
+
+    return [pscustomobject]@{
+        EventTypes   = @($etRows | ForEach-Object { [string]$_.event_type })
+        Statuses     = @($stRows | ForEach-Object { [string]$_.status })
+        WindowsUsers = @($usRows | ForEach-Object { [string]$_.windows_user })
+        MachineNames = @($mcRows | ForEach-Object { [string]$_.machine_name })
+        WindowTitles = @($wtRows | ForEach-Object { [string]$_.window_title })
+        SessionIds   = @($ssRows | ForEach-Object { [string]$_.session_id })
+        AppVersions  = @($avRows | ForEach-Object { [string]$_.app_version })
+        TotalCount   = $total
+    }
+}
+
+function Initialize-DzBitacoraTab {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [System.Windows.Window]$Window
+    )
+
+    $tabControl = $Window.FindName("tabControl")
+    $tabBitacora = $Window.FindName("tabBitacora")
+    $dgBitacora = $Window.FindName("dgBitacora")
+    if (-not $tabBitacora -or -not $dgBitacora) { return }
+
+    $ui = @{
+        Window         = $Window
+        TabControl     = $tabControl
+        Tab            = $tabBitacora
+        DataGrid       = $dgBitacora
+        CmbEventType   = $Window.FindName("cmbBitacoraEventType")
+        CmbStatus      = $Window.FindName("cmbBitacoraStatus")
+        CmbUser        = $Window.FindName("cmbBitacoraUser")
+        CmbMachine     = $Window.FindName("cmbBitacoraMachine")
+        CmbWindow      = $Window.FindName("cmbBitacoraWindow")
+        CmbSession     = $Window.FindName("cmbBitacoraSession")
+        CmbVersion     = $Window.FindName("cmbBitacoraVersion")
+        CmbAdmin       = $Window.FindName("cmbBitacoraAdmin")
+        CmbLimit       = $Window.FindName("cmbBitacoraLimit")
+        TxtAction      = $Window.FindName("txtBitacoraAction")
+        TxtControl     = $Window.FindName("txtBitacoraControl")
+        TxtTarget      = $Window.FindName("txtBitacoraTarget")
+        TxtDetails     = $Window.FindName("txtBitacoraDetails")
+        DpFrom         = $Window.FindName("dpBitacoraFrom")
+        DpTo           = $Window.FindName("dpBitacoraTo")
+        BtnQuery       = $Window.FindName("btnBitacoraQuery")
+        BtnRefresh     = $Window.FindName("btnBitacoraRefresh")
+        BtnClear       = $Window.FindName("btnBitacoraClear")
+        BtnMore        = $Window.FindName("btnBitacoraMore")
+        LblSummary     = $Window.FindName("lblBitacoraSummary")
+        TxtRowDetail   = $Window.FindName("txtBitacoraRowDetail")
+        Rows           = (New-Object 'System.Collections.ObjectModel.ObservableCollection[object]')
+        LastId         = [int64]0
+        TotalMatches   = [int64]0
+        LoadedOnce     = $false
+        SuppressEvents = $false
+    }
+
+    $dgBitacora.ItemsSource = $ui.Rows
+
+    $fillCombo = {
+        param($Combo, [string]$AllLabel, [array]$Values, [string]$PreferredValue)
+        if (-not $Combo) { return }
+        $Combo.Items.Clear()
+        [void]$Combo.Items.Add($AllLabel)
+        foreach ($v in @($Values)) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$v)) {
+                [void]$Combo.Items.Add([string]$v)
+            }
+        }
+        $idx = 0
+        if (-not [string]::IsNullOrWhiteSpace($PreferredValue)) {
+            for ($i = 1; $i -lt $Combo.Items.Count; $i++) {
+                if ([string]$Combo.Items[$i] -eq $PreferredValue) { $idx = $i; break }
+            }
+        }
+        $Combo.SelectedIndex = $idx
+    }.GetNewClosure()
+
+    $getComboVal = {
+        param($Combo)
+        if (-not $Combo -or $Combo.SelectedIndex -le 0 -or $null -eq $Combo.SelectedItem) { return "" }
+        return [string]$Combo.SelectedItem
+    }.GetNewClosure()
+
+    $loadFacets = {
+        $ui.SuppressEvents = $true
+        try {
+            $selEt = & $getComboVal $ui.CmbEventType
+            $selSt = & $getComboVal $ui.CmbStatus
+            $selUs = & $getComboVal $ui.CmbUser
+            $selMc = & $getComboVal $ui.CmbMachine
+            $selWt = & $getComboVal $ui.CmbWindow
+            $selSs = & $getComboVal $ui.CmbSession
+            $selAv = & $getComboVal $ui.CmbVersion
+
+            if ($ui.CmbAdmin -and $ui.CmbAdmin.Items.Count -eq 0) {
+                @('(Todos)', 'Sí (Admin)', 'No (Estándar)') | ForEach-Object { [void]$ui.CmbAdmin.Items.Add($_) }
+                $ui.CmbAdmin.SelectedIndex = 0
+            }
+            if ($ui.CmbLimit -and $ui.CmbLimit.Items.Count -eq 0) {
+                @('200', '500', '1000', '2000') | ForEach-Object { [void]$ui.CmbLimit.Items.Add($_) }
+                $ui.CmbLimit.SelectedIndex = 0
+            }
+
+            if ((Get-DzStorageMode) -eq 'sqlite') {
+                $f = Get-DzAuditLogFacets
+                & $fillCombo $ui.CmbEventType '(Todos)' $f.EventTypes $selEt
+                & $fillCombo $ui.CmbStatus '(Todos)' $f.Statuses $selSt
+                & $fillCombo $ui.CmbUser '(Todos)' $f.WindowsUsers $selUs
+                & $fillCombo $ui.CmbMachine '(Todos)' $f.MachineNames $selMc
+                & $fillCombo $ui.CmbWindow '(Todas)' $f.WindowTitles $selWt
+                & $fillCombo $ui.CmbSession '(Todas)' $f.SessionIds $selSs
+                & $fillCombo $ui.CmbVersion '(Todas)' $f.AppVersions $selAv
+            } else {
+                & $fillCombo $ui.CmbEventType '(Todos)' @() ''
+                & $fillCombo $ui.CmbStatus '(Todos)' @() ''
+                & $fillCombo $ui.CmbUser '(Todos)' @() ''
+                & $fillCombo $ui.CmbMachine '(Todos)' @() ''
+                & $fillCombo $ui.CmbWindow '(Todas)' @() ''
+                & $fillCombo $ui.CmbSession '(Todas)' @() ''
+                & $fillCombo $ui.CmbVersion '(Todas)' @() ''
+            }
+        } finally {
+            $ui.SuppressEvents = $false
+        }
+    }.GetNewClosure()
+
+    $runQuery = {
+        param([bool]$Append = $false)
+
+        if ((Get-DzStorageMode) -ne 'sqlite') {
+            $ui.Rows.Clear()
+            if ($ui.LblSummary) {
+                $ui.LblSummary.Text = "SQLite no está activo (modo fallback INI). La bitácora solo se consulta cuando dztools.db está disponible."
+            }
+            if ($ui.BtnMore) { $ui.BtnMore.Visibility = [System.Windows.Visibility]::Collapsed }
+            if ($ui.TxtRowDetail) { $ui.TxtRowDetail.Text = "" }
+            return
+        }
+
+        $limit = 200
+        if ($ui.CmbLimit -and $ui.CmbLimit.SelectedItem) {
+            [void][int]::TryParse([string]$ui.CmbLimit.SelectedItem, [ref]$limit)
+            if ($limit -lt 1) { $limit = 200 }
+        }
+
+        $adminFilter = 'All'
+        if ($ui.CmbAdmin) {
+            if ($ui.CmbAdmin.SelectedIndex -eq 1) { $adminFilter = 'Admin' }
+            elseif ($ui.CmbAdmin.SelectedIndex -eq 2) { $adminFilter = 'NonAdmin' }
+        }
+
+        $fromDt = $null
+        if ($ui.DpFrom -and $ui.DpFrom.SelectedDate) {
+            $fromDt = [datetime]::SpecifyKind($ui.DpFrom.SelectedDate.Date, [System.DateTimeKind]::Local)
+        }
+        $toDt = $null
+        if ($ui.DpTo -and $ui.DpTo.SelectedDate) {
+            $toDt = [datetime]::SpecifyKind($ui.DpTo.SelectedDate.Date.AddDays(1).AddMilliseconds(-1), [System.DateTimeKind]::Local)
+        }
+
+        $queryParams = @{
+            EventType   = (& $getComboVal $ui.CmbEventType)
+            Status      = (& $getComboVal $ui.CmbStatus)
+            WindowsUser = (& $getComboVal $ui.CmbUser)
+            MachineName = (& $getComboVal $ui.CmbMachine)
+            WindowTitle = (& $getComboVal $ui.CmbWindow)
+            SessionId   = (& $getComboVal $ui.CmbSession)
+            AppVersion  = (& $getComboVal $ui.CmbVersion)
+            ActionLabel = $(if ($ui.TxtAction) { [string]$ui.TxtAction.Text } else { "" })
+            ControlName = $(if ($ui.TxtControl) { [string]$ui.TxtControl.Text } else { "" })
+            Target      = $(if ($ui.TxtTarget) { [string]$ui.TxtTarget.Text } else { "" })
+            Search      = $(if ($ui.TxtDetails) { [string]$ui.TxtDetails.Text } else { "" })
+            AdminFilter = $adminFilter
+            From        = $fromDt
+            To          = $toDt
+        }
+
+        if (-not $Append) {
+            $ui.Rows.Clear()
+            $ui.LastId = [int64]0
+            $ui.TotalMatches = Get-DzAuditLogCount @queryParams
+            if ($ui.TxtRowDetail) { $ui.TxtRowDetail.Text = "" }
+        }
+
+        $afterIdVal = if ($Append) { $ui.LastId } else { [int64]0 }
+        $rows = @(Get-DzAuditLog @queryParams -Limit $limit -AfterId $afterIdVal)
+        foreach ($r in $rows) {
+            $ui.Rows.Add($r)
+            $ui.LastId = [int64]$r.id
+        }
+        $ui.LoadedOnce = $true
+
+        if ($ui.LblSummary) {
+            $ui.LblSummary.Text = "Mostrando $($ui.Rows.Count) de $($ui.TotalMatches) registros coincidentes en audit_log (solo consulta)."
+        }
+        if ($ui.BtnMore) {
+            $hasMore = ($rows.Count -ge $limit) -and ($ui.Rows.Count -lt $ui.TotalMatches)
+            $ui.BtnMore.Visibility = if ($hasMore) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
+        }
+    }.GetNewClosure()
+
+    $ensureLoaded = {
+        if (-not $ui.LoadedOnce -and -not $ui.LoadingInitial) {
+            $ui.LoadingInitial = $true
+            try {
+                & $loadFacets
+                & $runQuery $false
+            } finally {
+                $ui.LoadingInitial = $false
+            }
+        }
+    }.GetNewClosure()
+
+    if ($ui.BtnQuery) {
+        $ui.BtnQuery.Add_Click({
+                & $runQuery $false
+            }.GetNewClosure())
+    }
+    if ($ui.BtnRefresh) {
+        $ui.BtnRefresh.Add_Click({
+                & $loadFacets
+                & $runQuery $false
+            }.GetNewClosure())
+    }
+    if ($ui.BtnMore) {
+        $ui.BtnMore.Add_Click({
+                & $runQuery $true
+            }.GetNewClosure())
+    }
+    if ($ui.BtnClear) {
+        $ui.BtnClear.Add_Click({
+                $ui.SuppressEvents = $true
+                try {
+                    foreach ($cb in @($ui.CmbEventType, $ui.CmbStatus, $ui.CmbUser, $ui.CmbMachine, $ui.CmbWindow, $ui.CmbSession, $ui.CmbVersion, $ui.CmbAdmin, $ui.CmbLimit)) {
+                        if ($cb -and $cb.Items.Count -gt 0) { $cb.SelectedIndex = 0 }
+                    }
+                    foreach ($tb in @($ui.TxtAction, $ui.TxtControl, $ui.TxtTarget, $ui.TxtDetails)) {
+                        if ($tb) { $tb.Text = "" }
+                    }
+                    if ($ui.DpFrom) { $ui.DpFrom.SelectedDate = $null }
+                    if ($ui.DpTo) { $ui.DpTo.SelectedDate = $null }
+                } finally {
+                    $ui.SuppressEvents = $false
+                }
+                & $loadFacets
+                & $runQuery $false
+            }.GetNewClosure())
+    }
+
+    foreach ($cb in @($ui.CmbEventType, $ui.CmbStatus, $ui.CmbUser, $ui.CmbMachine, $ui.CmbWindow, $ui.CmbSession, $ui.CmbVersion, $ui.CmbAdmin, $ui.CmbLimit)) {
+        if ($cb) {
+            $cb.Add_SelectionChanged({
+                    if ($ui.SuppressEvents) { return }
+                    if ($ui.LoadedOnce) { & $runQuery $false }
+                }.GetNewClosure())
+        }
+    }
+
+    foreach ($dp in @($ui.DpFrom, $ui.DpTo)) {
+        if ($dp) {
+            $dp.Add_SelectedDateChanged({
+                    if ($ui.SuppressEvents) { return }
+                    if ($ui.LoadedOnce) { & $runQuery $false }
+                }.GetNewClosure())
+        }
+    }
+
+    foreach ($tb in @($ui.TxtAction, $ui.TxtControl, $ui.TxtTarget, $ui.TxtDetails)) {
+        if ($tb) {
+            $tb.Add_KeyDown({
+                    if ($_.Key -eq [System.Windows.Input.Key]::Return) {
+                        $_.Handled = $true
+                        & $runQuery $false
+                    }
+                }.GetNewClosure())
+        }
+    }
+
+    $dgBitacora.Add_SelectionChanged({
+            if (-not $ui.TxtRowDetail) { return }
+            $sel = $ui.DataGrid.SelectedItem
+            if ($null -eq $sel) {
+                $ui.TxtRowDetail.Text = ""
+                return
+            }
+            $prettyDetails = [string]$sel.details
+            if (-not [string]::IsNullOrWhiteSpace($prettyDetails)) {
+                try {
+                    $parsed = $prettyDetails | ConvertFrom-Json -ErrorAction Stop
+                    $prettyDetails = $parsed | ConvertTo-Json -Depth 6
+                } catch {}
+            }
+            $ui.TxtRowDetail.Text = @(
+                "ID=$($sel.id) | Fecha=$($sel.created_at_local) ($($sel.created_at)) | Tipo=$($sel.event_type) | Estado=$($sel.status) | Admin=$($sel.is_admin_text)"
+                "Usuario=$($sel.windows_user) | Equipo=$($sel.machine_name) | Ventana=$($sel.window_title) | Control=$($sel.control_name) | Sesion=$($sel.session_id) | Ver=$($sel.app_version)"
+                "Accion=$($sel.action_label) | Objetivo=$($sel.target)"
+                "Detalles: $prettyDetails"
+            ) -join "`r`n"
+        }.GetNewClosure())
+
+    if ($tabControl) {
+        $tabControl.Add_SelectionChanged({
+                if ($_.OriginalSource -ne $ui.TabControl -and $_.Source -ne $ui.TabControl) { return }
+                if ($ui.TabControl.SelectedItem -eq $ui.Tab) {
+                    & $ensureLoaded
+                }
+            }.GetNewClosure())
+    }
+    $tabBitacora.Add_IsVisibleChanged({
+            if ($ui.Tab.IsVisible -and $ui.TabControl -and $ui.TabControl.SelectedItem -eq $ui.Tab) {
+                & $ensureLoaded
+            }
+        }.GetNewClosure())
+
+    if ($tabBitacora.IsVisible) {
+        & $loadFacets
+    }
 }
 
 function Get-DzWpfElementText {
@@ -2653,6 +3157,10 @@ function Test-DzAuditShouldIgnoreClick {
     }
 
     if ($Control -is [System.Windows.Controls.MenuItem] -and $Control.HasItems) {
+        return $true
+    }
+
+    if ($Control -is [System.Windows.FrameworkElement] -and $Control.Tag -eq 'DzNoAudit') {
         return $true
     }
 
@@ -3031,7 +3539,7 @@ function Set-DzDatabaseRestrictedAcl {
 
     if (-not (Test-Path -LiteralPath $DbPath -PathType Leaf)) { return }
     try {
-        $acl = Get-Acl -LiteralPath $DbPath -ErrorAction Stop
+        $acl = New-Object System.Security.AccessControl.FileSecurity($DbPath, [System.Security.AccessControl.AccessControlSections]::Access)
         $acl.SetAccessRuleProtection($true, $false)
         $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
         $adminsSid = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
@@ -3042,7 +3550,7 @@ function Set-DzDatabaseRestrictedAcl {
             $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, $full, $allow)
             $acl.SetAccessRule($rule)
         }
-        Set-Acl -LiteralPath $DbPath -AclObject $acl -ErrorAction Stop
+        [System.IO.File]::SetAccessControl($DbPath, $acl)
     } catch {
         Write-DzStorageDebug "No se pudo ajustar ACL de ${DbPath}: $($_.Exception.Message)" ([System.ConsoleColor]::DarkGray)
     }
@@ -3214,6 +3722,9 @@ Export-ModuleMember -Function @(
     'Initialize-DzAudit',
     'Write-DzAuditEvent',
     'Get-DzAuditLog',
+    'Get-DzAuditLogCount',
+    'Get-DzAuditLogFacets',
+    'Initialize-DzBitacoraTab',
     'Invoke-DzAuditRetention',
     'ConvertFrom-DzLegacyToolsIni',
     'ConvertFrom-DzLegacyQueriesIni',

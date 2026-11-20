@@ -12,7 +12,7 @@
 |---|------|----------|
 | 1 | `sqlite3.dll` | Se sigue **descargando desde GitHub** (no entra al release). Se mueve de `C:\Temp\dztools\release\resources` a **`C:\Temp\dztools\runtime\`** para que no se borre al actualizar (hoy `dztools.ps1` elimina `release\` completo). |
 | 2 | Contraseñas SQL | **Cifradas con Windows DPAPI** (`CurrentUser` + entropía por servidor), con columna de formato versionado para poder rotar el esquema de cifrado en el futuro. |
-| 3 | Bitácora | Tabla `audit_log` con **captura global de clics** + eventos enriquecidos en acciones sensibles. **Sin visor** por ahora. Con filtro anti-ruido (Cerrar, Cancelar, ×, navegación, etc.). |
+| 3 | Bitácora | Tabla `audit_log` con **captura global de clics** + eventos enriquecidos en acciones sensibles. Pestaña de **consulta (solo lectura)** con filtros por columnas visible únicamente cuando **DEBUG** está activo (`tabBitacora`). Con filtro anti-ruido (Cerrar, Cancelar, ×, navegación, controles del visor, etc.). |
 | 4 | Historial de queries | **Sin límite de 100**, todo filtrado/paginado/búsqueda **en SQL**, con `duration_ms`, filtros (servidor/BD/estado/fechas) y **Favoritos**. |
 
 ### Fuera de alcance (no se tocan)

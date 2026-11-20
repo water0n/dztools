@@ -215,6 +215,8 @@ function New-MainForm {
     $tglDarkMode = $window.FindName("tglDarkMode")
     $tglDebugMode = $window.FindName("tglDebugMode")
     $chkStackedResults = $window.FindName("chkStackedResults")
+    $tabControlMain = $window.FindName("tabControl")
+    $tabBitacora = $window.FindName("tabBitacora")
     $script:predefinedQueries = Get-PredefinedQueries
     #Sirveaun?
     $script:sqlKeywords = 'ADD|ALL|ALTER|AND|ANY|AS|ASC|AUTHORIZATION|BACKUP|BETWEEN|BIGINT|BINARY|BIT|BY|CASE|CHECK|COLUMN|CONSTRAINT|CREATE|CROSS|CURRENT_DATE|CURRENT_TIME|CURRENT_TIMESTAMP|DATABASE|DEFAULT|DELETE|DESC|DISTINCT|DROP|EXEC|EXECUTE|EXISTS|FOREIGN|FROM|FULL|FUNCTION|GROUP|HAVING|IN|INDEX|INNER|INSERT|INT|INTO|IS|JOIN|KEY|LEFT|LIKE|LIMIT|NOT|NULL|ON|OR|ORDER|OUTER|PRIMARY|PROCEDURE|REFERENCES|RETURN|RIGHT|ROWNUM|SELECT|SET|SMALLINT|TABLE|TOP|TRUNCATE|UNION|UNIQUE|UPDATE|VALUES|VIEW|WHERE|WITH|RESTORE'
@@ -402,9 +404,16 @@ function New-MainForm {
     $txt_InfoInstrucciones.Text = $global:defaultInstructions
     $script:initializingToggles = $true
     if ($tglDarkMode) { $tglDarkMode.IsChecked = ((Get-DzUiMode) -eq 'dark') }
-    if ($tglDebugMode) { $tglDebugMode.IsChecked = (Get-DzDebugPreference) }
+    $initialDebug = Get-DzDebugPreference
+    if ($tglDebugMode) { $tglDebugMode.IsChecked = $initialDebug }
+    if ($tabBitacora) {
+        $tabBitacora.Visibility = if ($initialDebug) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
+    }
     if ($chkStackedResults) { $chkStackedResults.IsChecked = (Get-DzStackedResults) }
     $script:initializingToggles = $false
+    if (Get-Command Initialize-DzBitacoraTab -ErrorAction SilentlyContinue) {
+        Initialize-DzBitacoraTab -Window $window
+    }
     $script:setInstructionText = {
         param([string]$Message)
         if ($null -ne $txt_InfoInstrucciones) {
@@ -433,12 +442,19 @@ function New-MainForm {
         $tglDebugMode.Add_Checked({
                 if ($script:initializingToggles) { return }
                 Set-DzDebugPreference -Enabled $true
+                if ($tabBitacora) { $tabBitacora.Visibility = [System.Windows.Visibility]::Visible }
                 Write-Host "[DEBUG] Activado" -ForegroundColor Yellow
             })
         $tglDebugMode.Add_Unchecked({
                 Write-DzDebug "`t[DEBUG]Toggle DEBUG desactivado"
                 if ($script:initializingToggles) { return }
                 Set-DzDebugPreference -Enabled $false
+                if ($tabBitacora) {
+                    if ($tabControlMain -and $tabControlMain.SelectedItem -eq $tabBitacora) {
+                        $tabControlMain.SelectedIndex = 0
+                    }
+                    $tabBitacora.Visibility = [System.Windows.Visibility]::Collapsed
+                }
                 Write-Host "[DEBUG] Desactivado" -ForegroundColor DarkGray
             })
     }
