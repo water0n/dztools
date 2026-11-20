@@ -477,7 +477,7 @@ function Load-IniConnectionsToComboBox {
         Write-Host "`tNo se encontraron conexiones en archivos INI" -ForegroundColor Yellow
     }
     if ($connections.Count -gt 0) {
-        if ($connections -contains ".\\NationalSoft") {
+        if ($connections -contains ".\NationalSoft") {
             $Combo.Text = ".\NationalSoft"
         } else {
             $Combo.Text = [string]($connections | Select-Object -First 1)
@@ -2518,8 +2518,12 @@ function Disconnect-DbUiSafe {
 
     try {
         $ctx = Get-DbUiContext
+        $prevServer = [string]$ctx.Server
         Disconnect-DbCore -Ctx $ctx
         Save-DbUiContext -Ctx $ctx
+        if (-not [string]::IsNullOrWhiteSpace($prevServer) -and (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue)) {
+            Write-DzAuditEvent -EventType 'SQL_DISCONNECT' -Target $prevServer -Status 'OK'
+        }
         Write-Host "✓ Desconectado exitosamente" -ForegroundColor Green
     } catch {
         Write-DzDebug "`t[DEBUG][Disconnect] ERROR: $($_.Exception.Message)"
@@ -2532,6 +2536,7 @@ function Connect-DbUiSafe {
     [CmdletBinding()]
     param()
 
+    $ctx = $null
     try {
         $ctx = Get-DbUiContext
         Connect-DbCore -Ctx $ctx
@@ -2539,11 +2544,21 @@ function Connect-DbUiSafe {
         if (Get-Command Save-DzSqlConnection -ErrorAction SilentlyContinue) {
             Save-DzSqlConnection -Server $ctx.Server -User $ctx.User -Password $ctx.Password
         }
+        if (Get-Command Update-DzSqlConnectionUsage -ErrorAction SilentlyContinue) {
+            Update-DzSqlConnectionUsage -Server $ctx.Server -Database $ctx.Database
+        }
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+            Write-DzAuditEvent -EventType 'SQL_CONNECT' -Target $ctx.Server -Status 'OK' -Details @{ user = $ctx.User; database = $ctx.Database }
+        }
         Write-Host "✓ Conectado exitosamente a: $($ctx.Server)" -ForegroundColor Green
     } catch {
         Write-DzDebug "`t[DEBUG][Connect] CATCH: $($_.Exception.Message)"
         Write-DzDebug "`t[DEBUG][Connect] Tipo: $($_.Exception.GetType().FullName)"
         Write-DzDebug "`t[DEBUG][Connect] Stack: $($_.ScriptStackTrace)"
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+            $targetSrv = if ($ctx -and $ctx.txtServer) { ([string]$ctx.txtServer.Text).Trim() } else { "" }
+            Write-DzAuditEvent -EventType 'SQL_CONNECT' -Target $targetSrv -Status 'ERROR' -Details @{ error = $_.Exception.Message }
+        }
         Ui-Error "Error de conexión: $($_.Exception.Message)" $global:MainWindow
         Write-Host "Error | Error de conexión: $($_.Exception.Message)" -ForegroundColor Red
     }
@@ -2552,6 +2567,6 @@ Export-ModuleMember -Function @(
     'Invoke-SqlQuery', 'Invoke-SqlQueryMultiResultSet', 'Remove-SqlComments', 'Get-SqlDatabases', 'Get-SqlDatabasesInfo', 'Connect-DbUiSafe', 'Disconnect-DbUiSafe', 'get-DbUiContext',
     'Execute-SqlQuery', 'Get-IniConnections', 'Load-IniConnectionsToComboBox',
     'Show-MultipleResultSets', 'Export-ResultSetToCsv', 'Export-ResultSetToDelimitedText',
-    'Get-PredefinedQueries', 'Remove-SqlComments', 'Get-TextPointerFromOffset', 'Get-ResultTabHeaderText',
+    'Get-PredefinedQueries', 'Get-TextPointerFromOffset', 'Get-ResultTabHeaderText',
     'Get-ExportableResultTabs', 'Disconnect-DbCore', 'Connect-DbCore', 'Export-ResultsCore', 'Get-DbNameFromComboSelection'
 )

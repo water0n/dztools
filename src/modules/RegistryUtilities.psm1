@@ -134,6 +134,16 @@ function Write-NvmeAuditLog {
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::AppendAllText($logPath, $line + [Environment]::NewLine, $utf8NoBom)
         Write-NvmeDebug -Message "`t[DEBUG][NVMe Audit] $line" -Color DarkCyan
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+            $evType = if ($Action -eq 'Restore') { 'REGISTRY_NVME_RESTORE' } else { 'REGISTRY_NVME_APPLY' }
+            $st = if ($Result -eq 'Success') { 'OK' } else { 'ERROR' }
+            Write-DzAuditEvent -EventType $evType -Target $BackupId -Status $st -Details @{
+                action    = $Action
+                backup_id = $BackupId
+                result    = $Result
+                details   = $Details
+            }
+        }
     } catch {
         Write-NvmeDebug -Message "`t[DEBUG][NVMe Audit] Error escribiendo log: $($_.Exception.Message)" -Color Yellow
     }

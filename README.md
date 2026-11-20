@@ -162,18 +162,30 @@ dztools/
 |   |-- resources/
 |   |   `-- SQL.xshd
 |   `-- modules/
+|       |-- AI.psm1
+|       |-- AISqlContext.psm1
+|       |-- CloudBackup.psm1
 |       |-- Database.psm1
+|       |-- DzStorage.psm1
 |       |-- GUI.psm1
 |       |-- Installers.psm1
 |       |-- NationalUtilities.psm1
 |       |-- QueriesPad.psm1
 |       |-- RegistryUtilities.psm1
+|       |-- SqliteOps.psm1
 |       |-- SqlOps.psm1
 |       |-- SqlTreeView.psm1
 |       |-- Utilities.psm1
 |       `-- WindowsUtilities.psm1
 |-- tests/
-|   `-- Basic.Tests.ps1
+|   |-- AiModelSelection.Tests.ps1
+|   |-- AISqlContext.Tests.ps1
+|   |-- Basic.Tests.ps1
+|   |-- DatabaseMarkdown.Tests.ps1
+|   |-- DzStorage.Tests.ps1
+|   |-- NationalUtilities.Tests.ps1
+|   |-- QueriesPad.Tests.ps1
+|   `-- RegistryUtilities.Tests.ps1
 |-- .github/
 |   `-- workflows/
 |       `-- ci.yml
@@ -233,6 +245,18 @@ GitHub Actions ejecuta el flujo definido en `.github/workflows/ci.yml`:
 - Generacion del paquete `release`.
 - Publicacion del artefacto `dztools-package`.
 
+## Almacenamiento local (dztools.db)
+
+`dztools` persiste su configuracion, credenciales SQL, historial de queries, pestanas abiertas y bitacora en una base SQLite local ubicada en `C:\Temp\dztools\dztools.db` (reemplazando `dztools.ini` y `Queries.ini`):
+
+- **Runtime nativo (`sqlite3.dll`)**: se descarga de forma externa a `C:\Temp\dztools\runtime\sqlite3.dll` con validacion SHA256 (`.sha256`), manteniendo liviano el paquete `release\`. Guardar el DLL en `runtime\` evita que las actualizaciones con `dztools.ps1` lo eliminen.
+- **Migracion automatica**: al detectar `dztools.ini` y/o `Queries.ini`, se importan en una transaccion atomica hacia `dztools.db` y se renombran a `*.migrated.bak` (con las contrasenas SQL redactadas en `dztools.ini.migrated.bak`).
+- **Cifrado de credenciales**: las contrasenas SQL se almacenan cifradas por usuario de Windows mediante **DPAPI** (`CurrentUser` + entropia por servidor). Si cambia el usuario o equipo y no pueden descifrarse, se marca `needs_reentry` sin bloquear el arranque.
+- **Historial de queries y pestanas**: sin limite de 100 registros; paginacion *keyset* en SQL, busqueda FTS5 trigrama (con respaldo `LIKE`), filtros por servidor/BD/estado/periodo, registro de `duration_ms`, favoritos, eliminacion de duplicados conservando favoritos, y restauracion de pestanas con archivo, base y autoguardado.
+- **Bitacora de auditoria (`audit_log`)**: registra acciones relevantes de interfaz (con filtro anti-ruido que omite ventanas de sistema y botones como Cerrar/Cancelar) y eventos enriquecidos para operaciones sensibles (redaccion automatica de secretos; sin visor integrado por ahora).
+- **Modo fallback**: si falta `sqlite3.dll` (por ejemplo, primer arranque sin red o PowerShell x86), opera en modo INI legible y encola eventos de auditoria en `C:\Temp\dztools\audit-pending.jsonl` para sincronizarlos cuando SQLite vuelva a estar disponible.
+- **Respaldos y rollback**: genera copias rotativas semanales con `VACUUM INTO` en `C:\Temp\dztools\backups\db\`. Para volver temporalmente a INIs, cierra `dztools`, respalda/mueve `dztools.db` y restaura `dztools.ini.migrated.bak` y `Queries.ini.migrated.bak` eliminando el sufijo `.migrated.bak`.
+
 ## Seguridad y buenas practicas
 
 - Ejecuta respaldos antes de usar operaciones destructivas sobre bases de datos.
@@ -246,7 +270,7 @@ GitHub Actions ejecuta el flujo definido en `.github/workflows/ci.yml`:
 
 - Mejorar cobertura de pruebas automatizadas.
 - Documentar capturas de pantalla por modulo.
-- Agregar guia de configuracion para conexiones INI.
+- Agregar visor opcional y exportacion de bitacora (`audit_log`).
 - Refinar empaquetado y publicacion de releases.
 - Incorporar exportacion avanzada de resultados.
 - Fortalecer validaciones antes de operaciones destructivas.

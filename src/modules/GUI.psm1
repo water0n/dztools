@@ -587,6 +587,7 @@ function Show-WpfMessageBox {
         if (-not $ui -or -not $ui.Window) { throw "Show-WpfMessageBox: ventana no creada." }
 
         $w = $ui.Window
+        $w.Tag = 'DzNoAudit'
         $c = $ui.Controls
 
         $dzState = @{ Result = [System.Windows.MessageBoxResult]::None; Completed = $false }
@@ -787,6 +788,7 @@ function Show-WpfProgressBar {
     try {
         $result = New-WpfWindow -Xaml $stringXaml -PassThru
         $window = $result.Window
+        $window.Tag = 'DzNoAudit'
         Set-DzWpfThemeResources -Window $window -Theme $theme
         $window | Add-Member -MemberType NoteProperty -Name ProgressBar -Value $result.Controls['progressBar'] | Out-Null
         $window | Add-Member -MemberType NoteProperty -Name MessageLabel -Value $result.Controls['lblMessage'] | Out-Null
@@ -953,6 +955,7 @@ function New-WpfInputDialog {
 "@
     $result = New-WpfWindow -Xaml $stringXaml -PassThru
     $window = $result.Window
+    $window.Tag = 'DzNoAudit'
     Set-DzWpfThemeResources -Window $window -Theme $theme
     $controls = $result.Controls
     $script:inputValue = $null

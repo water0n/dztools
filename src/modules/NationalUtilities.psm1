@@ -451,6 +451,10 @@ function Show-DllRegistrationDialog {
                 if ($errors.Count -gt 0) { $detail += "`n`nDetalles:`n$($errors -join "`n")" }
                 $title = if ($errors.Count -gt 0) { "Proceso con errores" } else { "Proceso completado" }
                 $icon = if ($errors.Count -gt 0) { "Warning" } else { "Information" }
+                if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                    $stDll = if ($errors.Count -eq 0) { 'OK' } elseif ($success.Count -gt 0) { 'WARN' } else { 'ERROR' }
+                    Write-DzAuditEvent -EventType 'DLL_REGISTER' -Target "$(if ($isUnregister) { 'unregister' } else { 'register' })" -Status $stDll -Details @{ success_count = $success.Count; error_count = $errors.Count }
+                }
                 Show-WpfMessageBox -Message $detail -Title $title -Buttons OK -Icon $icon | Out-Null
             })
         $c['btnClose'].Add_Click({ $w.Close() })

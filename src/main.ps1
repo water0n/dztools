@@ -28,7 +28,7 @@ function Write-Log {
 }
 Write-Host "`nImportando módulos..." -ForegroundColor Yellow
 $modulesPath = Join-Path $PSScriptRoot "modules"
-$modules = @("GUI.psm1", "Database.psm1", "Utilities.psm1", "SqliteOps.psm1", "CloudBackup.psm1", "SqlTreeView.psm1", "Installers.psm1", "WindowsUtilities.psm1", "NationalUtilities.psm1", "SqlOps.psm1", "QueriesPad.psm1", "AISqlContext.psm1", "AI.psm1", "RegistryUtilities.psm1")
+$modules = @("GUI.psm1", "Database.psm1", "Utilities.psm1", "SqliteOps.psm1", "DzStorage.psm1", "CloudBackup.psm1", "SqlTreeView.psm1", "Installers.psm1", "WindowsUtilities.psm1", "NationalUtilities.psm1", "SqlOps.psm1", "QueriesPad.psm1", "AISqlContext.psm1", "AI.psm1", "RegistryUtilities.psm1")
 foreach ($module in $modules) {
     $modulePath = Join-Path $modulesPath $module
     if (Test-Path $modulePath) {
@@ -47,6 +47,7 @@ foreach ($module in $modules) {
 }
 $global:defaultInstructions = @"
 ----- CAMBIOS -----
+- Persistencia unificada en SQLite (dztools.db): configuración, credenciales SQL cifradas (DPAPI), historial ilimitado con búsqueda FTS5/filtros/favoritos, pestañas con archivo/BD/autoguardado y bitácora de auditoría
 - Se agregó herramienta de diagnóstico y corrección NVMe 4KB (Regedit) para SQL Server
 - Se agregó botón para SQLite Browser (dzSQLite)
     * Se agregó opción para incluir el respaldo de la base de datos en el mismo archivo comprimido.
@@ -128,6 +129,30 @@ function Initialize-Environment {
         Write-Host "  ✓ Sistema de queries inicializado" -ForegroundColor Green
     } catch {
         Write-Host "Advertencia: No se pudo inicializar el sistema de queries. $_" -ForegroundColor Yellow
+    }
+    $storageMode = "fallback"
+    if (Get-Command Get-DzStorageMode -ErrorAction SilentlyContinue) {
+        $storageMode = Get-DzStorageMode
+    }
+    if ($storageMode -eq 'sqlite') {
+        Write-Host "  ✓ Almacenamiento SQLite activo (dztools.db)" -ForegroundColor Green
+    } else {
+        $reason = if (Get-Command Get-DzStorageLastError -ErrorAction SilentlyContinue) { Get-DzStorageLastError } else { "" }
+        Write-Host "  ⚠ SQLite no disponible; operando en modo fallback INI. $reason" -ForegroundColor Yellow
+        $global:defaultInstructions = "⚠ MODO FALLBACK INI (SQLite no disponible: $reason)`r`n`r`n" + $global:defaultInstructions
+    }
+    if (Get-Command Initialize-DzAudit -ErrorAction SilentlyContinue) {
+        try {
+            Initialize-DzAudit
+            Write-DzAuditEvent -EventType 'APP_START' -Target $env:COMPUTERNAME -Status 'INFO' -Details @{
+                version      = $global:version
+                ps_version   = $PSVersionTable.PSVersion.ToString()
+                is_64bit     = [Environment]::Is64BitProcess
+                storage_mode = $storageMode
+            }
+        } catch {
+            Write-Host "Advertencia: No se pudo inicializar la bitácora de auditoría. $_" -ForegroundColor Yellow
+        }
     }
     return $true
 }
@@ -245,6 +270,9 @@ function New-MainForm {
                     $_.Tag -and
                     $_.Tag.Type -eq 'QueryTab'
                 })
+            if ($existingQueryTabs.Count -eq 0) {
+                New-QueryTab -TabControl $tcQueries | Out-Null
+            }
         }
     } catch {
         Write-Host "  Advertencia: No se pudieron restaurar las pestañas: $_" -ForegroundColor Yellow
@@ -255,6 +283,13 @@ function New-MainForm {
             })
         if ($existingQueryTabs.Count -eq 0) {
             New-QueryTab -TabControl $tcQueries | Out-Null
+        }
+    }
+    if (Get-Command Start-DzOpenTabsAutosaveTimer -ErrorAction SilentlyContinue) {
+        try {
+            Start-DzOpenTabsAutosaveTimer -TabControl $tcQueries -SaveHandler ${function:Save-OpenQueryTabs}
+        } catch {
+            Write-DzDebug "`t[DEBUG] No se pudo iniciar autoguardado de pestañas: $_" -Color Yellow
         }
     }
     if ($btnExecute -and -not $btnExecute.IsEnabled) {
@@ -277,9 +312,9 @@ function New-MainForm {
     function Stop-ExecutionTimer {
         $script:execStopwatch.Stop()
         if ($script:execUiTimer.IsEnabled) { $script:execUiTimer.Stop() }
-        if ($global:lblExecutionTime) {
+        if ($global:lblExecutionTimer) {
             $t = $script:execStopwatch.Elapsed
-            $global:lblExecutionTime.Text = ("Tiempo: {0:mm\:ss\.fff}" -f $t)
+            $global:lblExecutionTimer.Text = ("Tiempo: {0:mm\:ss\.fff}" -f $t)
         }
     }
     $global:txtServer = $txtServer
@@ -378,7 +413,7 @@ function New-MainForm {
     }.GetNewClosure()
     $script:showRestartNotice = {
         param([string]$settingLabel)
-        Show-WpfMessageBoxSafe -Message "Se guardó $settingLabel en dztools.ini.`nReinicia la aplicación para aplicar los cambios." -Title "Reinicio requerido" -Buttons "OK" -Icon "Information" -Owner $window | Out-Null
+        Show-WpfMessageBoxSafe -Message "Se guardó $settingLabel en la configuración.`nReinicia la aplicación para aplicar los cambios." -Title "Reinicio requerido" -Buttons "OK" -Icon "Information" -Owner $window | Out-Null
     }.GetNewClosure()
     if ($tglDarkMode) {
         $tglDarkMode.Add_Checked({
@@ -681,8 +716,17 @@ function New-MainForm {
                         }
                     } catch { Write-Host "`nError al eliminar el archivo." -ForegroundColor Red }
                 }
+                if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                    $stAny = if ($errors.Count -eq 0) { 'OK' } else { 'ERROR' }
+                    Write-DzAuditEvent -EventType 'ANYDESK_CLEAR' -Target 'AnyDesk' -Status $stAny -Details @{ deleted_files = $deletedFilesCount; errors = $errors }
+                }
                 if ($errors.Count -eq 0) { Ui-Info "$deletedFilesCount archivo(s) eliminado(s) correctamente." "Éxito" $global:MainWindow } else { Ui-Error "Se encontraron errores. Revisa la consola para más detalles." $global:MainWindow }
-            } else { Write-Host "`tEl usuario canceló la operación." -ForegroundColor Red }
+            } else {
+                if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                    Write-DzAuditEvent -EventType 'ANYDESK_CLEAR' -Target 'AnyDesk' -Status 'CANCELLED'
+                }
+                Write-Host "`tEl usuario canceló la operación." -ForegroundColor Red
+            }
         })
     $btnShowPrinters.Add_Click({
             Write-DzDebug ("`t[DEBUG] Click en 'Show Printers' - {0}" -f (Get-Date -Format "HH:mm:ss")) -Color DarkYellow
@@ -942,6 +986,9 @@ function New-MainForm {
                 Write-Host "PSScriptStackTrace:" -ForegroundColor Magenta
                 Write-Host $er.ScriptStackTrace -ForegroundColor Magenta
             }
+            if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                Write-DzAuditEvent -EventType 'APP_ERROR' -Target 'WPF.Dispatcher' -Status 'ERROR' -Details @{ message = $ex.Message; type = $ex.GetType().FullName }
+            }
             $e.Handled = $true
         })
     $window.Add_Closing({
@@ -965,6 +1012,12 @@ function New-MainForm {
                     Write-Host "  ✓ Conexión cerrada" -ForegroundColor Green
                 }
             } catch {}
+            if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+                Write-DzAuditEvent -EventType 'APP_EXIT' -Target $env:COMPUTERNAME -Status 'INFO' -Details @{ version = $global:version }
+            }
+            if (Get-Command Close-DzStorage -ErrorAction SilentlyContinue) {
+                Close-DzStorage
+            }
             Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
             Write-Host "  ¡Hasta pronto!" -ForegroundColor Green
             Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`n" -ForegroundColor Cyan
@@ -979,15 +1032,6 @@ function Start-Application {
         return
     }
     Write-Host "  ✓ Entorno listo" -ForegroundColor Green
-    Write-Host "`nCargando módulos..." -ForegroundColor Yellow
-    $modulesPath = Join-Path $PSScriptRoot "modules"
-    foreach ($module in $modules) {
-        $modulePath = Join-Path $modulesPath $module
-        if (Test-Path $modulePath) {
-            Import-Module $modulePath -Force -DisableNameChecking -ErrorAction Stop
-        }
-    }
-    Write-Host "  ✓ Módulos cargados" -ForegroundColor Green
     Write-Host "`nCreando interfaz gráfica..." -ForegroundColor Yellow
     $mainForm = New-MainForm
     Write-Host "  ✓ Interfaz lista`n" -ForegroundColor Green

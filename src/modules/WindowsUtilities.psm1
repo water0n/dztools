@@ -998,9 +998,15 @@ function Show-InstallPrinterDialog {
         }
         try {
           Add-Printer -Name $name -DriverName $driverName -PortName $portName -ErrorAction Stop | Out-Null
+          if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+            Write-DzAuditEvent -EventType 'PRINTER_INSTALL' -Target $name -Status 'OK' -Details @{ ip = $ip; port = $portName; driver = $driverName }
+          }
           Show-WpfMessageBox -Message "Impresora instalada correctamente.`nPuerto: $portName" -Title "Éxito" -Buttons OK -Icon Information | Out-Null
           $w.Close()
         } catch {
+          if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+            Write-DzAuditEvent -EventType 'PRINTER_INSTALL' -Target $name -Status 'ERROR' -Details @{ ip = $ip; error = $_.Exception.Message }
+          }
           Show-WpfMessageBox -Message "No se pudo instalar la impresora:`n$($_.Exception.Message)" -Title "Error" -Buttons OK -Icon Error | Out-Null
         }
       })
@@ -1048,10 +1054,16 @@ function Invoke-ClearPrintJobs {
     Write-Host "`tIniciando servicio Spooler..." -ForegroundColor DarkYellow
     Start-Service -Name Spooler -ErrorAction Stop
     if ($InfoTextBlock) { $InfoTextBlock.Text = "Listo: cola de impresión reiniciada." }
+    if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+      Write-DzAuditEvent -EventType 'PRINTER_CLEAR_JOBS' -Target 'Spooler' -Status 'OK'
+    }
     Show-WpfMessageBox -Message "Los trabajos de impresión han sido eliminados y el servicio de cola de impresión se reinició correctamente." -Title "Operación exitosa" -Buttons "OK" -Icon "Information" | Out-Null
     return $true
   } catch {
     $err = $_.Exception.Message
+    if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+      Write-DzAuditEvent -EventType 'PRINTER_CLEAR_JOBS' -Target 'Spooler' -Status 'ERROR' -Details @{ error = $err }
+    }
     Write-Host "`n[ERROR Invoke-ClearPrintJobs] $err" -ForegroundColor Red
     if ($InfoTextBlock) { $InfoTextBlock.Text = "Error: $err" }
     Show-WpfMessageBox -Message "Ocurrió un error al intentar limpiar impresoras o reiniciar el servicio:`n$err" -Title "Error" -Buttons "OK" -Icon "Error" | Out-Null
@@ -1869,10 +1881,16 @@ function Show-AddUserDialog {
         New-LocalUser -Name $username -Password $securePassword -AccountNeverExpires -PasswordNeverExpires | Out-Null
         Add-LocalGroupMember -Group $group -Member $username
         Write-DzDebug "`t[DEBUG][Show-AddUserDialog] Usuario creado: $username Grupo: $group"
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+          Write-DzAuditEvent -EventType 'WIN_USER_CREATE' -Target $username -Status 'OK' -Details @{ group = $group; is_admin = $isAdmin }
+        }
         Show-WpfMessageBox -Message "Usuario '$username' creado y agregado al grupo '$group'." -Title "Éxito" -Buttons OK -Icon Information | Out-Null
         $w.DialogResult = $true; $w.Close()
       } catch {
         Write-DzDebug "`t[DEBUG][Show-AddUserDialog] ERROR creando usuario: $($_.Exception.Message)" Red
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+          Write-DzAuditEvent -EventType 'WIN_USER_CREATE' -Target $username -Status 'ERROR' -Details @{ group = $group; is_admin = $isAdmin; error = $_.Exception.Message }
+        }
         & $SetStatus "Error: $($_.Exception.Message)" "Error"
         Show-WpfMessageBox -Message "Error al crear usuario:`n$($_.Exception.Message)" -Title "Error" -Buttons OK -Icon Error | Out-Null
       }
@@ -2271,9 +2289,15 @@ function Show-IPConfigDialog {
 
       try {
         Convert-DhcpToStatic -Alias $alias | Out-Null
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+          Write-DzAuditEvent -EventType 'WIN_IP_CONFIG' -Target $alias -Status 'OK' -Details @{ action = 'convert_static'; ip = $snap.IPAddress }
+        }
         Show-WpfMessageBox -Message "Listo. Se convirtió a IP fija usando $($snap.IPAddress)." -Title "Éxito" -Buttons OK -Icon Information | Out-Null
         $c['lblIps'].Text = (Get-AdapterIpsText -Alias $alias)
       } catch {
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+          Write-DzAuditEvent -EventType 'WIN_IP_CONFIG' -Target $alias -Status 'ERROR' -Details @{ action = 'convert_static'; error = $_.Exception.Message }
+        }
         Show-WpfMessageBox -Message "Error al convertir a IP fija:`n$($_.Exception.Message)" -Title "Error" -Buttons OK -Icon Error | Out-Null
       }
     })
@@ -2304,9 +2328,15 @@ function Show-IPConfigDialog {
 
       try {
         New-NetIPAddress -InterfaceAlias $alias -IPAddress $newIp -PrefixLength $snap.PrefixLength -ErrorAction Stop | Out-Null
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+          Write-DzAuditEvent -EventType 'WIN_IP_CONFIG' -Target $alias -Status 'OK' -Details @{ action = 'assign_ip'; ip = $newIp; prefix = $snap.PrefixLength }
+        }
         Show-WpfMessageBox -Message "Se agregó la IP adicional $newIp al adaptador $alias." -Title "Éxito" -Buttons OK -Icon Information | Out-Null
         $c['lblIps'].Text = (Get-AdapterIpsText -Alias $alias)
       } catch {
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+          Write-DzAuditEvent -EventType 'WIN_IP_CONFIG' -Target $alias -Status 'ERROR' -Details @{ action = 'assign_ip'; ip = $newIp; error = $_.Exception.Message }
+        }
         Show-WpfMessageBox -Message "Error al agregar IP:`n$($_.Exception.Message)" -Title "Error" -Buttons OK -Icon Error | Out-Null
       }
     })
@@ -2338,9 +2368,15 @@ function Show-IPConfigDialog {
 
         ipconfig /renew $alias | Out-Null
 
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+          Write-DzAuditEvent -EventType 'WIN_IP_CONFIG' -Target $alias -Status 'OK' -Details @{ action = 'enable_dhcp' }
+        }
         Show-WpfMessageBox -Message "Se cambió a DHCP y se limpió la puerta de enlace/rutas del adaptador $alias." -Title "Éxito" -Buttons OK -Icon Information | Out-Null
         $c['lblIps'].Text = "Generando IP por DHCP. Seleccione de nuevo."
       } catch {
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+          Write-DzAuditEvent -EventType 'WIN_IP_CONFIG' -Target $alias -Status 'ERROR' -Details @{ action = 'enable_dhcp'; error = $_.Exception.Message }
+        }
         Show-WpfMessageBox -Message "Error al cambiar a DHCP:`n$($_.Exception.Message)" -Title "Error" -Buttons OK -Icon Error | Out-Null
       }
 
@@ -3008,8 +3044,14 @@ function Show-FirewallConfigDialog {
           }
         }
         if ($errors.Count -gt 0) {
+          if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+            Write-DzAuditEvent -EventType 'WIN_FIREWALL_RULE' -Target "$ruleName ($port)" -Status 'ERROR' -Details @{ port = $port; errors = $errors }
+          }
           & $SetStatus "Errores al crear reglas: $($errors -join '; ')" "Error"
         } elseif ($created -gt 0) {
+          if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+            Write-DzAuditEvent -EventType 'WIN_FIREWALL_RULE' -Target ($createdRules -join ', ') -Status 'OK' -Details @{ port = $port; directions = $directions; created = $created }
+          }
           & $SetStatus "Se agregaron $created regla(s) para el puerto $port." "Ok"
           $dirText = ($directions | ForEach-Object { if ($_ -eq "Inbound") { "Entrada" } else { "Salida" } }) -join " y "
           $msg = "Regla(s) agregada(s) exitosamente:`n`nNombre: $($createdRules -join ', ')`nPuerto: $port`nDirección: $dirText"

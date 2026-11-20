@@ -4,11 +4,35 @@
 $script:DzToolsConfigPath = "C:\Temp\dztools\dztools.ini"
 $script:DzDebugEnabled = $null
 
+function Test-DzStorageModuleActive {
+    [CmdletBinding()]
+    param()
+    $cmd = Get-Command Get-DzStorageMode -ErrorAction SilentlyContinue
+    if (-not $cmd) { return $false }
+    try {
+        return ((Get-DzStorageMode) -ne 'uninitialized')
+    } catch {
+        return $false
+    }
+}
+
 function Get-DzToolsConfigPath {
+    if (Test-DzStorageModuleActive) {
+        if ((Get-DzStorageMode) -eq 'sqlite' -and (Get-Command Get-DzStorageDbPath -ErrorAction SilentlyContinue)) {
+            return (Get-DzStorageDbPath)
+        }
+    }
     return $script:DzToolsConfigPath
 }
 function Get-DzDebugPreference {
-    $configPath = Get-DzToolsConfigPath
+    if (Test-DzStorageModuleActive) {
+        $val = Get-DzSetting -Section 'dev' -Key 'debug' -Default 'false'
+        return ([string]$val).Trim().ToLowerInvariant() -eq 'true'
+    }
+    if ($null -ne $script:DzDebugEnabled) {
+        return [bool]$script:DzDebugEnabled
+    }
+    $configPath = $script:DzToolsConfigPath
     if (-not (Test-Path -LiteralPath $configPath)) {
         return $false
     }
@@ -111,7 +135,12 @@ function Update-DzIniSetting {
         [string]$Value
     )
 
-    $configPath = Get-DzToolsConfigPath
+    if (Test-DzStorageModuleActive) {
+        Set-DzSetting -Section $Section -Key $Key -Value $Value
+        return
+    }
+
+    $configPath = $script:DzToolsConfigPath
 
     if (-not (Test-Path -LiteralPath $configPath)) {
         Initialize-DzToolsConfig | Out-Null
@@ -172,7 +201,12 @@ function Update-DzIniSetting {
     Set-Content -LiteralPath $configPath -Value $lines -Encoding UTF8
 }
 function Get-DzUiMode {
-    $configPath = Get-DzToolsConfigPath
+    if (Test-DzStorageModuleActive) {
+        $mode = ([string](Get-DzSetting -Section 'ui' -Key 'mode' -Default 'light')).Trim().ToLowerInvariant()
+        if ($mode -match '^(dark|light)$') { return $mode }
+        return 'light'
+    }
+    $configPath = $script:DzToolsConfigPath
     if (-not (Test-Path -LiteralPath $configPath)) {
         return "light"
     }
@@ -202,15 +236,25 @@ function Set-DzUiMode {
         [ValidateSet('dark', 'light')]
         [string]$Mode
     )
+    if (Test-DzStorageModuleActive) {
+        Set-DzSetting -Section 'ui' -Key 'mode' -Value $Mode
+        return
+    }
     Update-DzIniSetting -Section "UI" -Key "mode" -Value $Mode
 }
 function Get-DzStackedResults {
-    $uiSettings = Get-DzIniSectionMap -Section "UI"
-    if (-not $uiSettings -or -not $uiSettings.ContainsKey("stacked_results")) {
-        return $true
+    $raw = $null
+    if (Test-DzStorageModuleActive) {
+        $raw = Get-DzSetting -Section 'ui' -Key 'stacked_results' -Default 'true'
+    } else {
+        $uiSettings = Get-DzIniSectionMap -Section "UI"
+        if ($uiSettings -and $uiSettings.ContainsKey("stacked_results")) {
+            $raw = $uiSettings["stacked_results"]
+        }
     }
+    if ($null -eq $raw) { return $true }
 
-    $value = ([string]$uiSettings["stacked_results"]).Trim().ToLowerInvariant()
+    $value = ([string]$raw).Trim().ToLowerInvariant()
     if ($value -match '^(false|0|no|off)$') { return $false }
     if ($value -match '^(true|1|yes|on)$') { return $true }
     return $true
@@ -222,6 +266,10 @@ function Set-DzStackedResults {
     )
 
     $value = if ($Enabled) { 'true' } else { 'false' }
+    if (Test-DzStorageModuleActive) {
+        Set-DzSetting -Section 'ui' -Key 'stacked_results' -Value $value
+        return
+    }
     Update-DzIniSetting -Section "UI" -Key "stacked_results" -Value $value
 }
 function Set-DzDebugPreference {
@@ -234,11 +282,21 @@ function Set-DzDebugPreference {
     } else {
         'false'
     }
-    Update-DzIniSetting -Section "desarrollo" -Key "debug" -Value $value
+    if (Test-DzStorageModuleActive) {
+        Set-DzSetting -Section 'dev' -Key 'debug' -Value $value
+    } else {
+        Update-DzIniSetting -Section "desarrollo" -Key "debug" -Value $value
+    }
     $script:DzDebugEnabled = $Enabled
 }
 function Initialize-DzToolsConfig {
-    $configPath = Get-DzToolsConfigPath
+    if (Get-Command Initialize-DzStorage -ErrorAction SilentlyContinue) {
+        [void](Initialize-DzStorage)
+        $script:DzDebugEnabled = Get-DzDebugPreference
+        return $script:DzDebugEnabled
+    }
+
+    $configPath = $script:DzToolsConfigPath
     $configDir = Split-Path -Path $configPath -Parent
     if (-not (Test-Path -LiteralPath $configDir)) {
         New-Item -ItemType Directory -Path $configDir -Force | Out-Null
@@ -257,7 +315,11 @@ function Get-DzIniSectionMap {
         [string]$Section
     )
 
-    $configPath = Get-DzToolsConfigPath
+    if (Test-DzStorageModuleActive) {
+        return (Get-DzSettingsSection -Section $Section)
+    }
+
+    $configPath = $script:DzToolsConfigPath
     if (-not (Test-Path -LiteralPath $configPath)) { return @{} }
 
     $content = Get-Content -LiteralPath $configPath -ErrorAction SilentlyContinue
@@ -289,6 +351,10 @@ function Get-DzSavedSqlConnections {
     [CmdletBinding()]
     param()
 
+    if (Test-DzStorageModuleActive) {
+        return @(Get-DzSqlConnectionRecords)
+    }
+
     $entries = Get-DzIniSectionMap -Section "sql"
     $connections = @()
     foreach ($server in $entries.Keys) {
@@ -305,9 +371,10 @@ function Get-DzSavedSqlConnections {
             $password = ""
         }
         $connections += [pscustomobject]@{
-            Server   = $server
-            User     = $user
-            Password = $password
+            Server       = $server
+            User         = $user
+            Password     = $password
+            NeedsReentry = $false
         }
     }
     return $connections
@@ -321,6 +388,12 @@ function Get-DzSavedSqlConnection {
 
     $serverText = $Server.Trim()
     if ([string]::IsNullOrWhiteSpace($serverText)) { return $null }
+
+    if (Test-DzStorageModuleActive) {
+        $matches = @(Get-DzSqlConnectionRecords -Server $serverText)
+        if ($matches.Count -gt 0) { return $matches[0] }
+        return $null
+    }
 
     $entries = Get-DzSavedSqlConnections
     foreach ($entry in $entries) {
@@ -343,6 +416,11 @@ function Save-DzSqlConnection {
 
     if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($User)) { return }
     if ([string]::IsNullOrWhiteSpace($Password)) { return }
+
+    if (Test-DzStorageModuleActive) {
+        Save-DzSqlConnectionRecord -Server $Server -User $User -Password $Password
+        return
+    }
 
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($Password)
     $encoded = [Convert]::ToBase64String($bytes)
@@ -1594,8 +1672,12 @@ function Apply-SavedSqlCredentials {
         }
 
         if ($global:txtPassword) {
-            $global:txtPassword.Password = $saved.Password
-            Write-DzDebug "`t[DEBUG] ✓ Contraseña aplicada"
+            $global:txtPassword.Password = [string]$saved.Password
+            if ($saved.PSObject.Properties['NeedsReentry'] -and $saved.NeedsReentry) {
+                Write-Host "⚠ Las credenciales guardadas para '$ServerText' requieren volver a capturar la contraseña." -ForegroundColor Yellow
+            } else {
+                Write-DzDebug "`t[DEBUG] ✓ Contraseña aplicada"
+            }
         }
     } catch {
         Write-DzDebug "`t[DEBUG] ✗ Error aplicando credenciales: $_" -Color Red
@@ -1917,6 +1999,11 @@ function Set-AdaptersToPrivate {
                 Ui-Error "No se pudo cambiar ningún adaptador.`n`n$($errors -join "`n")" $Owner
             }
         }
+        if (Get-Command Write-DzAuditEvent -ErrorAction SilentlyContinue) {
+            $adapterNames = @($toConvert | ForEach-Object { $_.AdapterName }) -join ', '
+            $st = if ($changed -gt 0 -and $errors.Count -eq 0) { 'OK' } elseif ($changed -gt 0) { 'WARN' } else { 'ERROR' }
+            Write-DzAuditEvent -EventType 'WIN_NETWORK_PRIVATE' -Target $adapterNames -Status $st -Details @{ changed = $changed; total = $toConvert.Count; errors = $errors }
+        }
         if (Get-Command Refresh-AdapterStatus -ErrorAction SilentlyContinue) {
             Start-Sleep -Milliseconds 500
             Refresh-AdapterStatus
@@ -1940,4 +2027,4 @@ Export-ModuleMember -Function @(
     'Get-NetworkAdapterStatus', 'Get-SqlPortWithDebug', 'Show-SqlPortsInfo', 'Show-WarnDialog',
     'Get-7ZipPath', 'Install-7ZipWithChoco', 'Show-SQLselector', 'Show-WpfPathSelectionDialog', 'get-NSApplicationsIniReport',
     'Set-ClipboardTextSafe', 'Initialize-SystemInfo', 'Update-PortsUI', 'Update-NetworkUI',
-    'Apply-SavedSqlCredentials', 'Apply-SavedSqlCredentials', 'Set-AdaptersToPrivate')
+    'Apply-SavedSqlCredentials', 'Set-AdaptersToPrivate')
